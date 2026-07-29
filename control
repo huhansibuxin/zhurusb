@@ -1,0 +1,9 @@
+Package: com.block.alipay.sb
+Name: BlockAlipaySB
+Version: 1.0
+Architecture: iphoneos-arm64
+Depends: mobilesubstrate
+Description: SpringBoard插件｜拦截支付宝外部唤起 + 后台兜底查杀
+Maintainer: Dev
+Author: Dev
+Section: Tweaks
