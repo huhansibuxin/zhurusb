@@ -8,6 +8,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = BlockAlipaySB
 BlockAlipaySB_FILES = Tweak.xm
 BlockAlipaySB_CFLAGS = -fobjc-arc
+BlockAlipaySB_LIBRARIES = substrate
 BlockAlipaySB_LDFLAGS = -Wl,-undefined,dynamic_lookup
 
 include $(THEOS_MAKE_PATH)/tweak.mk
