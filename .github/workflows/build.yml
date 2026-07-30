@@ -1,24 +1,28 @@
-name: Build
+name: Build ProcGuard
 
-on: [push, workflow_dispatch]
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Install deps
-        run: brew install dpkg ldid
-      - name: Clone theos
-        run: git clone --recurse-submodules https://github.com/theos/theos.git $THEOS
-        env:
-          THEOS: /opt/theos
+        with:
+          submodules: recursive
+
+      - name: Install theos
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+
       - name: Build
-        run: make package
-        env:
-          THEOS: /opt/theos
+        run: |
+          export THEOS=~/theos
+          make package FINALPACKAGE=1
+
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: BlockAlipaySB-deb
+          name: ProcGuard-deb
           path: packages/*.deb

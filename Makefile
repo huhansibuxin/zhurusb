@@ -5,10 +5,13 @@ INSTALL_TARGET_PROCESSES = SpringBoard
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = BlockAlipaySB
-BlockAlipaySB_FILES = Tweak.xm
-BlockAlipaySB_CFLAGS = -fobjc-arc
-BlockAlipaySB_LIBRARIES = substrate
-BlockAlipaySB_LDFLAGS = -Wl,-undefined,dynamic_lookup
+TWEAK_NAME = ProcGuard
+ProcGuard_FILES = Tweak.xm
+ProcGuard_CFLAGS = -fobjc-arc
+ProcGuard_LIBRARIES = substrate
+ProcGuard_LDFLAGS = -Wl,-undefined,dynamic_lookup
+ProcGuard_PRIVATE_FRAMEWORKS = RunningBoardServices
 
 include $(THEOS_MAKE_PATH)/tweak.mk
+SUBPROJECTS += ProcGuardPrefs
+include $(THEOS_MAKE_PATH)/aggregate.mk

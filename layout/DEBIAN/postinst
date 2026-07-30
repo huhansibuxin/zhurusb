@@ -1,0 +1,16 @@
+#!/bin/bash
+# ProcGuard postinst - 创建预配置文件目录并写入默认值
+PREF_DIR="/var/mobile/Library/Preferences"
+mkdir -p "$PREF_DIR"
+DEFAULT_PREFS="$PREF_DIR/com.block.procguard.prefs.plist"
+if [ ! -f "$DEFAULT_PREFS" ]; then
+    /usr/libexec/PlistBuddy -c "Add targets array" "$DEFAULT_PREFS" 2>/dev/null || {
+        echo '<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict><key>targets</key><array><string>com.alipay.iphoneclient</string></array></dict>
+</plist>' > "$DEFAULT_PREFS"
+    }
+    chown mobile:mobile "$DEFAULT_PREFS" 2>/dev/null
+fi
+exit 0

@@ -1,9 +1,9 @@
-Package: com.block.alipay.sb
-Name: BlockAlipaySB
-Version: 1.0
+Package: com.block.procguard
+Name: ProcGuard
+Version: 2.0
 Architecture: iphoneos-arm64
-Depends: mobilesubstrate
-Description: SpringBoard插件｜拦截支付宝外部唤起 + 后台兜底查杀
+Depends: mobilesubstrate, firmware (>= 16.0)
+Description: SpringBoard进程守护管理器 | RBS原生终止 + 洪水限流 + 设置面板自定义目标
 Maintainer: Dev
 Author: Dev
 Section: Tweaks
