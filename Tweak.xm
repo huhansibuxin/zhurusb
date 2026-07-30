@@ -1,14 +1,12 @@
 #import <Foundation/Foundation.h>
-#import <dispatch/dispatch.h>
 #import <substrate.h>
-#import <signal.h>
-#import <time.h>
+#import <UIKit/UIKit.h>
 
 #define PREFS_PATH @"/var/jb/var/mobile/Library/Preferences/com.block.procguard.prefs.plist"
 #define KILL_DELAY 60
 
 static NSSet *appTargetSet = nil;
-static NSMutableDictionary *backgroundTimes = nil;
+static volatile BOOL shouldKill = NO;
 
 static void LoadPrefs(void) {
     NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
@@ -25,48 +23,26 @@ static void PrefsChanged(CFNotificationCenterRef center, void *observer, CFStrin
     LoadPrefs();
 }
 
-%hook SBApplication
-- (void)_didSuspend {
-    %orig;
-    NSString *bid = ((id(*)(id, SEL))objc_msgSend)(self, @selector(bundleIdentifier));
-    if (bid && backgroundTimes && [appTargetSet containsObject:bid]) {
-        backgroundTimes[bid] = @((long)time(NULL));
-    }
-}
-
-- (void)_willResume {
-    %orig;
-    NSString *bid = ((id(*)(id, SEL))objc_msgSend)(self, @selector(bundleIdentifier));
-    if (bid && backgroundTimes) {
-        [backgroundTimes removeObjectForKey:bid];
-    }
-}
-%end
-
 %ctor {
-    LoadPrefs();
-    backgroundTimes = [NSMutableDictionary dictionary];
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if ([bid isEqualToString:@"com.apple.springboard"]) return;
 
-    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                                                      dispatch_get_main_queue());
-    dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
-    dispatch_source_set_event_handler(timer, ^{
-        time_t now = time(NULL);
-        NSArray *keys = [backgroundTimes allKeys];
-        for (NSString *bid in keys) {
-            long bgTime = (long)[backgroundTimes[bid] integerValue];
-            if (now - bgTime >= KILL_DELAY) {
-                id ctrl = ((id(*)(id, SEL))objc_msgSend)(objc_getClass("SBApplicationController"),
-                                                           @selector(sharedInstance));
-                id app = ((id(*)(id, SEL, id))objc_msgSend)(ctrl,
-                                                              @selector(applicationWithBundleIdentifier:), bid);
-                int pid = app ? (int)((long(*)(id, SEL))objc_msgSend)(app, @selector(pid)) : 0;
-                if (pid > 0) kill(pid, SIGKILL);
-                [backgroundTimes removeObjectForKey:bid];
-            }
-        }
-    });
-    dispatch_resume(timer);
+    LoadPrefs();
+    if (![appTargetSet containsObject:bid]) return;
+
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
+        object:nil queue:nil usingBlock:^(NSNotification *note) {
+            shouldKill = YES;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, KILL_DELAY * NSEC_PER_SEC),
+                dispatch_get_main_queue(), ^{
+                    if (shouldKill) exit(0);
+                });
+        }];
+
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification
+        object:nil queue:nil usingBlock:^(NSNotification *note) {
+            shouldKill = NO;
+        }];
 
     CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
     CFNotificationCenterAddObserver(nc, NULL, PrefsChanged,
