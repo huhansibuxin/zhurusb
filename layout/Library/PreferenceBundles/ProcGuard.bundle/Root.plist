@@ -10,7 +10,7 @@
 			<key>label</key>
 			<string>应用管理</string>
 			<key>footerText</key>
-			<string>选择需要守护的应用，切后台 60 秒后自动终止。默认拦截支付宝。</string>
+			<string>选择需要守护的应用，切后台时自动终止。默认拦截支付宝。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -22,13 +22,14 @@
 			<key>isController</key>
 			<true/>
 		</dict>
+
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>参数说明</string>
 			<key>footerText</key>
-			<string>延迟杀机制：应用切后台后等待 60 秒再终止，期间回到前台自动取消。后续版本将改为 3 分钟。</string>
+			<string>Flood保护：3秒内触发2次自动封锁120秒，防止进程反复重启被杀导致系统不稳定。</string>
 		</dict>
 	</array>
 	<key>title</key>

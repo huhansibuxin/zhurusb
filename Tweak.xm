@@ -30,6 +30,15 @@ static void PrefsChanged(CFNotificationCenterRef center, void *observer, CFStrin
     LoadPrefs();
     if (![appTargetSet containsObject:bid]) return;
 
+    // 静默推送/后台拉起：App 出生就在后台，直接开始倒计时
+    if ([UIApplication sharedApplication].applicationState != UIApplicationStateActive) {
+        shouldKill = YES;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, KILL_DELAY * NSEC_PER_SEC),
+            dispatch_get_main_queue(), ^{
+                if (shouldKill) exit(0);
+            });
+    }
+
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
         object:nil queue:nil usingBlock:^(NSNotification *note) {
             shouldKill = YES;
