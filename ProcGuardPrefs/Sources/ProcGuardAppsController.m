@@ -60,18 +60,6 @@
         [specs addObject:spec];
     }
 
-    // 搜索框
-    if (specs.count > 10) {
-        PSSpecifier *searchSpec = [PSSpecifier preferenceSpecifierNamed:@"搜索"
-            target:self
-            set:NULL
-            get:NULL
-            detail:nil
-            cell:PSSearchDisplayCell
-            edit:nil];
-        [specs insertObject:searchSpec atIndex:0];
-    }
-
     _specifiers = specs;
 }
 
