@@ -1,17 +1,10 @@
 #import <substrate.h>
 #import <UIKit/UIKit.h>
-#import <time.h>
-#include <sys/sysctl.h>
-#include <signal.h>
 
 #define PREFS_PATH @"/var/jb/var/mobile/Library/Preferences/com.block.procguard.prefs.plist"
-#define FLOOD_INTERVAL 3
-#define FLOOD_MAX_COUNT 2
-#define BLOCK_DURATION 120
 
 static NSSet *appTargetSet = nil;
 static NSArray *daemonTargets = nil;
-static NSMutableDictionary *floodState = nil;
 
 // ── 读取预置 ──
 static void LoadPrefs(void) {
@@ -32,71 +25,6 @@ static void LoadPrefs(void) {
     }
 }
 
-// ── 洪水限流 ──
-static BOOL IsFloodBlocked(NSString *key) {
-    NSDictionary *s = floodState[key];
-    if (!s) return NO;
-    return time(NULL) < [s[@"blockUntil"] intValue];
-}
-
-static void FloodTick(NSString *key) {
-    NSMutableDictionary *s = floodState[key];
-    if (!s) {
-        s = [NSMutableDictionary dictionaryWithObjectsAndKeys:@(0), @"lastTime", @(0), @"count", @(0), @"blockUntil", nil];
-        floodState[key] = s;
-    }
-    time_t now = time(NULL);
-    time_t last = [s[@"lastTime"] intValue];
-    if (now - last > FLOOD_INTERVAL) {
-        s[@"count"] = @(0);
-    }
-    s[@"lastTime"] = @(now);
-    int count = [s[@"count"] intValue] + 1;
-    s[@"count"] = @(count);
-    if (count >= FLOOD_MAX_COUNT) {
-        s[@"blockUntil"] = @(now + BLOCK_DURATION);
-    }
-}
-
-// ── 杀守护进程 ──
-static void KillDaemon(NSString *name) {
-    if (IsFloodBlocked(name)) return;
-    FloodTick(name);
-
-    const char *targetName = [name UTF8String];
-    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
-    size_t len = 0;
-
-    if (sysctl(mib, 4, NULL, &len, NULL, 0) != 0) return;
-    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(len);
-    if (!procs) return;
-    if (sysctl(mib, 4, procs, &len, NULL, 0) != 0) {
-        free(procs);
-        return;
-    }
-
-    int count = len / sizeof(struct kinfo_proc);
-    for (int i = 0; i < count; i++) {
-        if (strcmp(procs[i].kp_proc.p_comm, targetName) == 0) {
-            kill(procs[i].kp_proc.p_pid, SIGKILL);
-        }
-    }
-    free(procs);
-}
-
-// ── 切后台回调 ──
-static void OnAppBackground(void) {
-    NSString *myBID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!myBID) return;
-
-    if ([appTargetSet containsObject:myBID]) {
-        for (NSString *dn in daemonTargets) {
-            KillDaemon(dn);
-        }
-        exit(0);
-    }
-}
-
 // ── Darwin 通知 ──
 static void PrefsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     LoadPrefs();
@@ -106,16 +34,24 @@ static void PrefsChanged(CFNotificationCenterRef center, void *observer, CFStrin
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
     if ([bid isEqualToString:@"com.apple.springboard"]) return;
 
-    floodState = [NSMutableDictionary dictionary];
     LoadPrefs();
+
+    // Daemon 自裁：注入了就是目标，直接退出
+    if ([daemonTargets containsObject:bid]) {
+        exit(0);
+    }
+
+    // App 切后台自裁
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
+        object:nil queue:nil usingBlock:^(NSNotification *note) {
+            NSString *myBID = [[NSBundle mainBundle] bundleIdentifier];
+            if (myBID && [appTargetSet containsObject:myBID]) {
+                exit(0);
+            }
+        }];
 
     CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
     CFNotificationCenterAddObserver(nc, NULL, PrefsChanged,
         CFSTR("com.block.procguard-prefs-changed"), NULL,
         CFNotificationSuspensionBehaviorDeliverImmediately);
-
-    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
-        object:nil queue:nil usingBlock:^(NSNotification *note) {
-            OnAppBackground();
-        }];
 }

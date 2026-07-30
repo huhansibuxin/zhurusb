@@ -1,1 +1,1 @@
-{ Filter = { Bundles = ( "com.apple.UIKit" ); }; }
+{ Filter = { Bundles = ( "com.apple.UIKit", "com.apple.FileProvider.LocalStorage", "com.apple.storedownloadd", "com.apple.appstored" ); }; }

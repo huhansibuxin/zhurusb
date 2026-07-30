@@ -28,7 +28,7 @@
 			<key>label</key>
 			<string>系统守护</string>
 			<key>footerText</key>
-			<string>逗号分隔多个守护进程名（如 absd,accessoryd），应用切后台时同步终止。留空则只杀应用。</string>
+			<string>逗号分隔多个守护进程 Bundle ID（如 com.apple.storedownloadd,com.apple.appstored）。插件注入后立即自裁。留空则只杀应用。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -40,7 +40,7 @@
 			<key>key</key>
 			<string>daemonTargetsText</string>
 			<key>placeholder</key>
-			<string>absd,accessoryd</string>
+			<string>com.apple.storedownloadd,com.apple.appstored</string>
 		</dict>
 		<dict>
 			<key>cell</key>
