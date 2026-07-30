@@ -57,28 +57,23 @@ static void FloodCheck() {
 static void SafeTerminateProcess(id handle) {
     if (!handle) return;
 
-    pid_t pid = (pid_t)((int(*)(id, SEL))objc_msgSend)(handle, @selector(pid));
-    NSString *bid = ((NSString*(*)(id, SEL))objc_msgSend)(handle, @selector(bundleIdentifier));
-    if (![bid isEqualToString:AlipayBundleID]) return;
+    @autoreleasepool {
+        pid_t pid = (pid_t)((int(*)(id, SEL))objc_msgSend)(handle, @selector(pid));
+        if (pid <= 0) return;
 
-    BOOL isForeground = ((BOOL(*)(id, SEL))objc_msgSend)(handle, @selector(isForeground));
-    if (isForeground) {
-        NSLog(@"[SB] 支付宝前台运行，跳过终止 PID:%d", pid);
-        ResetFlood();
-        return;
-    }
+        NSString *bid = ((NSString*(*)(id, SEL))objc_msgSend)(handle, @selector(bundleIdentifier));
+        if (![bid isEqualToString:AlipayBundleID]) return;
 
-    if (class_respondsToSelector(object_getClass(handle), @selector(terminateForReason:description:error:))) {
-        NSError *error = nil;
-        BOOL success = ((BOOL(*)(id, SEL, int, NSString*, NSError**))objc_msgSend)(handle,
-            @selector(terminateForReason:description:error:), 4, @"block background suspend", &error);
-        if (success) {
-            NSLog(@"[SB] 成功终止支付宝后台进程 PID:%d", pid);
-        } else {
-            NSLog(@"[SB] 终止失败: %@ (PID:%d)", error.localizedDescription, pid);
+        BOOL isForeground = ((BOOL(*)(id, SEL))objc_msgSend)(handle, @selector(isForeground));
+        if (isForeground) {
+            NSLog(@"[SB] 支付宝前台运行，跳过终止 PID:%d", pid);
+            ResetFlood();
+            return;
         }
-    } else {
-        if (pid > 0) kill(pid, SIGKILL);
+
+        // SpringBoard 作为 mobile 用户可以直接 kill 用户 app
+        kill(pid, SIGKILL);
+        NSLog(@"[SB] kill 支付宝 PID:%d", pid);
     }
 }
 
@@ -119,21 +114,27 @@ static void SafeTerminateProcess(id handle) {
         ((void(*)(id, SEL, id))objc_msgSend)(config, @selector(setPredicate:), predicate);
         ((void(*)(id, SEL, id))objc_msgSend)(config, @selector(setEventHandler:), ^(id handle) {
             if (!handle) return;
-            pid_t pid = (pid_t)((int(*)(id, SEL))objc_msgSend)(handle, @selector(pid));
+            @autoreleasepool {
+                pid_t pid = (pid_t)((int(*)(id, SEL))objc_msgSend)(handle, @selector(pid));
 
-            dispatch_async(sb_block_alipay_queue, ^{
-                if ([processedPids containsObject:@(pid)]) return;
-                [processedPids addObject:@(pid)];
+                dispatch_async(sb_block_alipay_queue, ^{
+                    @autoreleasepool {
+                        if ([processedPids containsObject:@(pid)]) return;
+                        [processedPids addObject:@(pid)];
 
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
-                    sb_block_alipay_queue, ^{
-                        if (!IsLocked()) {
-                            FloodCheck();
-                            SafeTerminateProcess(handle);
-                        }
-                        [processedPids removeObject:@(pid)];
-                    });
-            });
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                            sb_block_alipay_queue, ^{
+                                @autoreleasepool {
+                                    if (!IsLocked()) {
+                                        FloodCheck();
+                                        SafeTerminateProcess(handle);
+                                    }
+                                    [processedPids removeObject:@(pid)];
+                                }
+                            });
+                    }
+                });
+            }
         });
 
         id monitor = ((id(*)(id, SEL, id))objc_msgSend)([RBSMonitorCls alloc],
