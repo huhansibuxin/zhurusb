@@ -16,6 +16,31 @@ jobs:
         run: |
           bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
 
+      - name: Download SDK
+        run: |
+          curl -fSL "https://github.com/theos/sdks/archive/refs/heads/master.zip" -o /tmp/sdks-master.zip
+          unzip -q /tmp/sdks-master.zip -d /tmp/sdks-tmp
+          # 查找 iPhoneOS SDK（优先 .sdk 目录，兜底 .tar.xz）
+          SDKDIR=$(ls -d /tmp/sdks-tmp/*/iPhoneOS*.sdk 2>/dev/null | head -1)
+          if [ -z "$SDKDIR" ]; then
+            echo "No .sdk dir found, checking for archives..."
+            SDKFILE=$(ls /tmp/sdks-tmp/*/iPhoneOS*.tar.xz 2>/dev/null | head -1)
+            if [ -z "$SDKFILE" ]; then
+              SDKFILE=$(ls /tmp/sdks-tmp/*/iPhoneOS*.tar.bz2 2>/dev/null | head -1)
+            fi
+            if [ -n "$SDKFILE" ]; then
+              tar -xf "$SDKFILE" -C $HOME/theos/sdks/
+              echo "Extracted SDK from archive"
+            else
+              echo "No iPhoneOS SDK found"; ls /tmp/sdks-tmp/*/; exit 1
+            fi
+          else
+            cp -r "$SDKDIR" $HOME/theos/sdks/
+            echo "Copied SDK: $(basename $SDKDIR)"
+          fi
+          rm -rf /tmp/sdks-tmp /tmp/sdks-master.zip
+        shell: bash
+
       - name: Build
         run: |
           export THEOS=~/theos
