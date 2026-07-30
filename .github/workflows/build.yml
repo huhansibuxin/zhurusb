@@ -27,23 +27,23 @@ jobs:
           mkdir -p $HOME/theos/sdks
           curl -fSL "https://github.com/theos/sdks/archive/refs/heads/master.zip" -o /tmp/sdks-master.zip
           unzip -q /tmp/sdks-master.zip -d /tmp/sdks-tmp
-          # 查找 iPhoneOS SDK（优先 .sdk 目录，兜底 .tar.xz）
-          SDKDIR=$(ls -d /tmp/sdks-tmp/*/iPhoneOS*.sdk 2>/dev/null | head -1)
-          if [ -z "$SDKDIR" ]; then
-            echo "No .sdk dir found, checking for archives..."
-            SDKFILE=$(ls /tmp/sdks-tmp/*/iPhoneOS*.tar.xz 2>/dev/null | head -1)
+          # 精确匹配 Makefile 中 TARGET 指定的 SDK 版本
+          SDKDIR=$(ls -d /tmp/sdks-tmp/*/iPhoneOS16.5.sdk 2>/dev/null | head -1)
+          if [ -n "$SDKDIR" ]; then
+            cp -r "$SDKDIR" $HOME/theos/sdks/
+            echo "Copied SDK: $(basename $SDKDIR)"
+          else
+            echo "iPhoneOS16.5.sdk not found, checking archives..."
+            SDKFILE=$(ls /tmp/sdks-tmp/*/iPhoneOS16.5.tar.xz 2>/dev/null | head -1)
             if [ -z "$SDKFILE" ]; then
-              SDKFILE=$(ls /tmp/sdks-tmp/*/iPhoneOS*.tar.bz2 2>/dev/null | head -1)
+              SDKFILE=$(ls /tmp/sdks-tmp/*/iPhoneOS16.5.tar.bz2 2>/dev/null | head -1)
             fi
             if [ -n "$SDKFILE" ]; then
               tar -xf "$SDKFILE" -C $HOME/theos/sdks/
               echo "Extracted SDK from archive"
             else
-              echo "No iPhoneOS SDK found"; ls /tmp/sdks-tmp/*/; exit 1
+              echo "iPhoneOS16.5 SDK not found"; ls /tmp/sdks-tmp/*/; exit 1
             fi
-          else
-            cp -r "$SDKDIR" $HOME/theos/sdks/
-            echo "Copied SDK: $(basename $SDKDIR)"
           fi
           rm -rf /tmp/sdks-tmp /tmp/sdks-master.zip
         shell: bash
