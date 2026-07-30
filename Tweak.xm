@@ -4,77 +4,70 @@
 #import <signal.h>
 #import <time.h>
 #import <os/lock.h>
-
-@class RBSProcessHandle;
-@class RBSProcessMonitor;
-@class RBSProcessMonitorConfiguration;
-@class RBSProcessPredicate;
+#import <libproc.h>
 
 static NSString *const AlipayBundleID = @"com.alipay.iphoneclient";
 
+#define SCAN_INTERVAL_SEC  2
 #define FLOOD_INTERVAL     3
 #define FLOOD_MAX_COUNT    2
 #define BLOCK_DURATION     120
 
-static dispatch_queue_t sb_block_alipay_queue;
+static dispatch_source_t scanTimer = nil;
 static os_unfair_lock floodLock = OS_UNFAIR_LOCK_INIT;
-static time_t lastTrigger = 0;
-static int triggerCnt = 0;
+static time_t lastKill = 0;
+static int killCnt = 0;
 static time_t blockUntil = 0;
-static NSMutableSet *processedPids;
-static id rbsMonitor = nil;
 
-static BOOL IsLocked() {
+static BOOL IsLocked(void) {
     os_unfair_lock_lock(&floodLock);
-    time_t now = time(NULL);
-    BOOL locked = (now < blockUntil);
+    BOOL locked = (time(NULL) < blockUntil);
     os_unfair_lock_unlock(&floodLock);
     return locked;
 }
 
-static void ResetFlood() {
-    os_unfair_lock_lock(&floodLock);
-    triggerCnt = 0;
-    lastTrigger = time(NULL);
-    os_unfair_lock_unlock(&floodLock);
-}
-
-static void FloodCheck() {
+static void FloodCheck(void) {
     os_unfair_lock_lock(&floodLock);
     time_t now = time(NULL);
-    if (now - lastTrigger > FLOOD_INTERVAL) {
-        triggerCnt = 0;
-        lastTrigger = now;
+    if (now - lastKill > FLOOD_INTERVAL) {
+        killCnt = 0;
+        lastKill = now;
     }
-    triggerCnt++;
-    if (triggerCnt >= FLOOD_MAX_COUNT) {
+    killCnt++;
+    if (killCnt >= FLOOD_MAX_COUNT) {
         blockUntil = now + BLOCK_DURATION;
-        NSLog(@"[SB] 频繁唤醒触发限流，封锁%ds", BLOCK_DURATION);
+        NSLog(@"[SB] 限流触发，封锁%ds", BLOCK_DURATION);
     }
     os_unfair_lock_unlock(&floodLock);
 }
 
-static void SafeTerminateProcess(id handle) {
-    if (!handle) return;
+static void ScanAndKillAlipay(void) {
+    if (IsLocked()) return;
 
-    @autoreleasepool {
-        pid_t pid = (pid_t)((int(*)(id, SEL))objc_msgSend)(handle, @selector(pid));
-        if (pid <= 0) return;
+    int numpids = proc_listallpids(NULL, 0);
+    if (numpids <= 0) return;
 
-        NSString *bid = ((NSString*(*)(id, SEL))objc_msgSend)(handle, @selector(bundleIdentifier));
-        if (![bid isEqualToString:AlipayBundleID]) return;
+    pid_t *pids = malloc(sizeof(pid_t) * numpids);
+    if (!pids) return;
 
-        BOOL isForeground = ((BOOL(*)(id, SEL))objc_msgSend)(handle, @selector(isForeground));
-        if (isForeground) {
-            NSLog(@"[SB] 支付宝前台运行，跳过终止 PID:%d", pid);
-            ResetFlood();
-            return;
+    numpids = proc_listallpids(pids, (int)(sizeof(pid_t) * numpids));
+
+    for (int i = 0; i < numpids; i++) {
+        if (pids[i] <= 0) continue;
+
+        char pathbuf[PROC_PIDPATHINFO_MAXSIZE] = {0};
+        if (proc_pidpath(pids[i], pathbuf, sizeof(pathbuf)) <= 0) continue;
+
+        if (strstr(pathbuf, "/AlipayWallet.app/") || strstr(pathbuf, "/AliPay.app/")) {
+            @autoreleasepool {
+                kill(pids[i], SIGKILL);
+                FloodCheck();
+                NSLog(@"[SB] kill 支付宝 PID:%d", pids[i]);
+            }
+            break;
         }
-
-        // SpringBoard 作为 mobile 用户可以直接 kill 用户 app
-        kill(pid, SIGKILL);
-        NSLog(@"[SB] kill 支付宝 PID:%d", pid);
     }
+    free(pids);
 }
 
 %hook UIApplication
@@ -90,68 +83,20 @@ static void SafeTerminateProcess(id handle) {
 %end
 
 %ctor {
-    sb_block_alipay_queue = dispatch_queue_create("com.sb.blockalipay.queue", DISPATCH_QUEUE_SERIAL);
-    processedPids = [NSMutableSet new];
-
-    dispatch_async(sb_block_alipay_queue, ^{
-        Class RBSMonitorCls = objc_getClass("RBSProcessMonitor");
-        Class RBSConfigCls = objc_getClass("RBSProcessMonitorConfiguration");
-        Class RBSPredicateCls = objc_getClass("RBSProcessPredicate");
-
-        if (!RBSMonitorCls || !RBSConfigCls || !RBSPredicateCls) {
-            NSLog(@"[SB] RBS类不可用");
-            return;
-        }
-
-        id predicate = ((id(*)(id, SEL, NSString*))objc_msgSend)(RBSPredicateCls,
-            @selector(predicateMatchingBundleID:), AlipayBundleID);
-        if (!predicate) {
-            NSLog(@"[SB] 创建RBS谓词失败");
-            return;
-        }
-
-        id config = ((id(*)(id, SEL))objc_msgSend)([RBSConfigCls alloc], @selector(init));
-        ((void(*)(id, SEL, id))objc_msgSend)(config, @selector(setPredicate:), predicate);
-        ((void(*)(id, SEL, id))objc_msgSend)(config, @selector(setEventHandler:), ^(id handle) {
-            if (!handle) return;
-            @autoreleasepool {
-                pid_t pid = (pid_t)((int(*)(id, SEL))objc_msgSend)(handle, @selector(pid));
-
-                dispatch_async(sb_block_alipay_queue, ^{
-                    @autoreleasepool {
-                        if ([processedPids containsObject:@(pid)]) return;
-                        [processedPids addObject:@(pid)];
-
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
-                            sb_block_alipay_queue, ^{
-                                @autoreleasepool {
-                                    if (!IsLocked()) {
-                                        FloodCheck();
-                                        SafeTerminateProcess(handle);
-                                    }
-                                    [processedPids removeObject:@(pid)];
-                                }
-                            });
-                    }
-                });
-            }
-        });
-
-        id monitor = ((id(*)(id, SEL, id))objc_msgSend)([RBSMonitorCls alloc],
-            @selector(initWithConfiguration:), config);
-        ((void(*)(id, SEL))objc_msgSend)(monitor, @selector(start));
-        rbsMonitor = monitor;
-        NSLog(@"[BlockAlipaySB] RBS监视器启动成功");
+    dispatch_queue_t q = dispatch_queue_create("com.sb.alipayscan", DISPATCH_QUEUE_SERIAL);
+    scanTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
+    dispatch_source_set_timer(scanTimer, dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC),
+        SCAN_INTERVAL_SEC * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(scanTimer, ^{
+        ScanAndKillAlipay();
     });
+    dispatch_resume(scanTimer);
+    NSLog(@"[BlockAlipaySB] 定时扫描已启动 (%ds)", SCAN_INTERVAL_SEC);
 }
 
 %dtor {
-    dispatch_async(sb_block_alipay_queue, ^{
-        if (rbsMonitor && class_respondsToSelector(object_getClass(rbsMonitor), @selector(stop))) {
-            ((void(*)(id, SEL))objc_msgSend)(rbsMonitor, @selector(stop));
-            NSLog(@"[SB] RBS监视器已停止");
-        }
-        rbsMonitor = nil;
-        processedPids = nil;
-    });
+    if (scanTimer) {
+        dispatch_source_cancel(scanTimer);
+        scanTimer = nil;
+    }
 }
