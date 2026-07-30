@@ -4,7 +4,7 @@ include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = ProcGuardPrefs
 
-ProcGuardPrefs_FILES = Sources/ProcGuardRootListController.m
+ProcGuardPrefs_FILES = Sources/ProcGuardRootListController.m Sources/ProcGuardAppsController.m
 ProcGuardPrefs_INSTALL_PATH = /Library/PreferenceBundles
 ProcGuardPrefs_CFLAGS = -fobjc-arc
 ProcGuardPrefs_FRAMEWORKS = UIKit

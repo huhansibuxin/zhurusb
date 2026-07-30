@@ -1,39 +1,37 @@
 #import <substrate.h>
 #import <UIKit/UIKit.h>
 #import <time.h>
-#import <objc/runtime.h>
-#import <dlfcn.h>
+#import <spawn.h>
+
+extern char **environ;
 
 #define PREFS_PATH @"/var/jb/var/mobile/Library/Preferences/com.block.procguard.prefs.plist"
 #define FLOOD_INTERVAL 3
 #define FLOOD_MAX_COUNT 2
 #define BLOCK_DURATION 120
 
-// ── RBS 前向声明 ──
-@interface RBSProcessPredicate : NSObject
-+ (instancetype)predicateMatchingBundleIdentifier:(NSString *)bundleID;
-+ (instancetype)predicateMatchingExecPath:(NSString *)path;
-@end
+static NSSet *appTargetSet = nil;
+static NSArray *daemonTargets = nil;
+static NSMutableDictionary *floodState = nil;
 
-@interface RBSProcessHandle : NSObject
-@property (readonly) int pid;
-@property (readonly) NSString *name;
-+ (instancetype)handleForPredicate:(RBSProcessPredicate *)pred error:(NSError **)error;
-- (BOOL)terminateWithError:(NSError **)error;
-@end
+// ── 读取预置 ──
+static void LoadPrefs(void) {
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
 
-@interface RBSProcessMonitorConfiguration : NSObject
-@property (copy) NSArray<RBSProcessPredicate *> *predicates;
-@property (copy) void (^updateHandler)(id monitor, RBSProcessHandle *handle, id update);
-@end
+    NSArray *apps = prefs[@"appTargets"];
+    if ([apps isKindOfClass:[NSArray class]] && apps.count > 0) {
+        appTargetSet = [NSSet setWithArray:apps];
+    } else {
+        appTargetSet = [NSSet setWithObject:@"com.alipay.iphoneclient"];
+    }
 
-@interface RBSProcessMonitor : NSObject
-+ (instancetype)monitorWithConfiguration:(RBSProcessMonitorConfiguration *)config;
-@end
-
-// ── 全局状态 ──
-static NSMutableDictionary *floodState = nil;  // key -> {lastTime, count, blockUntil}
-static RBSProcessMonitor *currentMonitor = nil;
+    NSArray *daemons = prefs[@"daemonTargets"];
+    if ([daemons isKindOfClass:[NSArray class]]) {
+        daemonTargets = daemons;
+    } else {
+        daemonTargets = @[];
+    }
+}
 
 // ── 洪水限流 ──
 static BOOL IsFloodBlocked(NSString *key) {
@@ -52,10 +50,8 @@ static void FloodTick(NSString *key) {
     time_t last = [s[@"lastTime"] intValue];
     if (now - last > FLOOD_INTERVAL) {
         s[@"count"] = @(0);
-        s[@"lastTime"] = @(now);
-    } else {
-        s[@"lastTime"] = @(now);
     }
+    s[@"lastTime"] = @(now);
     int count = [s[@"count"] intValue] + 1;
     s[@"count"] = @(count);
     if (count >= FLOOD_MAX_COUNT) {
@@ -63,67 +59,53 @@ static void FloodTick(NSString *key) {
     }
 }
 
-// ── 目标列表解析（prefs 存 "targets" 数组） ──
-static NSArray<NSDictionary *> *LoadTargets(void) {
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
-    NSArray *raw = prefs[@"targets"];
-    if (!raw || ![raw isKindOfClass:[NSArray class]]) {
-        // 默认拦截支付宝
-        return @[@{@"type": @"bundle", @"value": @"com.alipay.iphoneclient"}];
-    }
-    NSMutableArray *targets = [NSMutableArray array];
-    for (id item in raw) {
-        if ([item isKindOfClass:[NSString class]]) {
-            NSString *val = [(NSString *)item stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-            if (val.length == 0) continue;
-            NSString *type = [val hasPrefix:@"/"] ? @"exec" : @"bundle";
-            [targets addObject:@{@"type": type, @"value": val}];
-        }
-    }
-    return targets.count > 0 ? targets : @[@{@"type": @"bundle", @"value": @"com.alipay.iphoneclient"}];
-}
+// ── 杀守护进程 ──
+static void KillDaemon(NSString *name) {
+    if (IsFloodBlocked(name)) return;
+    FloodTick(name);
 
-// ── 重建 monitor ──
-static void RebuildMonitor(void) {
-    if (currentMonitor) { currentMonitor = nil; }
-    NSArray *targets = LoadTargets();
-    NSMutableArray *preds = [NSMutableArray array];
-    for (NSDictionary *t in targets) {
-        NSString *type = t[@"type"];
-        NSString *value = t[@"value"];
-        RBSProcessPredicate *pred = nil;
-        if ([type isEqualToString:@"bundle"]) {
-            pred = [RBSProcessPredicate predicateMatchingBundleIdentifier:value];
-        } else {
-            pred = [RBSProcessPredicate predicateMatchingExecPath:value];
-        }
-        if (pred) [preds addObject:pred];
-    }
-    if (preds.count == 0) return;
-
-    RBSProcessMonitorConfiguration *cfg = [[RBSProcessMonitorConfiguration alloc] init];
-    cfg.predicates = preds;
-    cfg.updateHandler = ^(id monitor, RBSProcessHandle *handle, id update) {
-        NSString *bid = handle.name;
-        if (IsFloodBlocked(bid)) return;
-        FloodTick(bid);
-        NSError *err = nil;
-        [handle terminateWithError:&err];
+    pid_t pid;
+    const char *args[] = {
+        "/var/jb/usr/bin/killall",
+        "-9",
+        [name UTF8String],
+        NULL
     };
-    currentMonitor = [RBSProcessMonitor monitorWithConfiguration:cfg];
+    posix_spawn(&pid, "/var/jb/usr/bin/killall", NULL, NULL, (char *const *)args, environ);
 }
 
-// ── Darwin 通知回调 ──
+// ── 切后台回调 ──
+static void OnAppBackground(void) {
+    NSString *myBID = [[NSBundle mainBundle] bundleIdentifier];
+    if (!myBID) return;
+
+    if ([appTargetSet containsObject:myBID]) {
+        for (NSString *dn in daemonTargets) {
+            KillDaemon(dn);
+        }
+        exit(0);
+    }
+}
+
+// ── Darwin 通知 ──
 static void PrefsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    RebuildMonitor();
+    LoadPrefs();
 }
 
 %ctor {
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if ([bid isEqualToString:@"com.apple.springboard"]) return;
+
     floodState = [NSMutableDictionary dictionary];
-    RebuildMonitor();
+    LoadPrefs();
 
     CFNotificationCenterRef nc = CFNotificationCenterGetDarwinNotifyCenter();
     CFNotificationCenterAddObserver(nc, NULL, PrefsChanged,
         CFSTR("com.block.procguard-prefs-changed"), NULL,
         CFNotificationSuspensionBehaviorDeliverImmediately);
+
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
+        object:nil queue:nil usingBlock:^(NSNotification *note) {
+            OnAppBackground();
+        }];
 }

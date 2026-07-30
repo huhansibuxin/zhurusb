@@ -8,21 +8,39 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>目标进程列表</string>
+			<string>应用管理</string>
 			<key>footerText</key>
-			<string>每行一个目标。App填Bundle ID（如com.alipay.iphoneclient），系统守护进程填绝对路径（如/System/Library/PrivateFrameworks/StoreKit.framework/Support/storekitd）。修改后自动生效。</string>
+			<string>选择需要守护的应用，切后台时自动终止。默认拦截支付宝。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSLinkCell</string>
+			<key>label</key>
+			<string>选择应用</string>
+			<key>detail</key>
+			<string>ProcGuardAppsController</string>
+			<key>isController</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>系统守护</string>
+			<key>footerText</key>
+			<string>每行一个守护进程名（如 absd、accessoryd），应用切后台时同步终止。留空则只杀应用。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSEditTextCell</string>
 			<key>default</key>
-			<string>com.alipay.iphoneclient</string>
+			<string></string>
 			<key>defaults</key>
 			<string>com.block.procguard.prefs</string>
 			<key>key</key>
-			<string>targetsText</string>
+			<string>daemonTargetsText</string>
 			<key>placeholder</key>
-			<string>com.alipay.iphoneclient</string>
+			<string>absd</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -30,7 +48,7 @@
 			<key>label</key>
 			<string>参数说明</string>
 			<key>footerText</key>
-			<string>Flood保护：3秒内触发2次自动封锁120秒。只杀后台/守护进程，前台不受影响。</string>
+			<string>Flood保护：3秒内触发2次自动封锁120秒，防止进程反复重启被杀导致系统不稳定。</string>
 		</dict>
 	</array>
 	<key>title</key>

@@ -22,13 +22,13 @@
     if (!value) {
         value = specifier.properties[@"default"];
     }
-    // targetsText 是从 targets 数组重建的多行文本
-    if ([key isEqualToString:@"targetsText"]) {
-        NSArray *targets = prefs[@"targets"];
-        if ([targets isKindOfClass:[NSArray class]]) {
+    // daemonTargetsText 从 daemonTargets 数组重建多行文本
+    if ([key isEqualToString:@"daemonTargetsText"]) {
+        NSArray *targets = prefs[@"daemonTargets"];
+        if ([targets isKindOfClass:[NSArray class]] && targets.count > 0) {
             return [targets componentsJoinedByString:@"\n"];
         }
-        return value;
+        return @"";
     }
     return value ?: specifier.properties[@"default"];
 }
@@ -37,7 +37,7 @@
     NSMutableDictionary *prefs = [NSMutableDictionary dictionaryWithContentsOfFile:PREFS_PATH] ?: [NSMutableDictionary dictionary];
     NSString *key = specifier.properties[@"key"];
 
-    if ([key isEqualToString:@"targetsText"]) {
+    if ([key isEqualToString:@"daemonTargetsText"]) {
         NSString *text = value;
         NSArray *lines = [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
         NSMutableArray *targets = [NSMutableArray array];
@@ -47,7 +47,7 @@
                 [targets addObject:trimmed];
             }
         }
-        prefs[@"targets"] = targets;
+        prefs[@"daemonTargets"] = targets;
     } else {
         prefs[key] = value;
     }
