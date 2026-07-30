@@ -2,30 +2,21 @@
 #import <UIKit/UIKit.h>
 
 #define PREFS_PATH @"/var/jb/var/mobile/Library/Preferences/com.block.procguard.prefs.plist"
+#define KILL_DELAY 60
 
 static NSSet *appTargetSet = nil;
-static NSArray *daemonTargets = nil;
+static dispatch_block_t pendingKill = nil;
 
-// ── 读取预置 ──
 static void LoadPrefs(void) {
     NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
-
     NSArray *apps = prefs[@"appTargets"];
     if ([apps isKindOfClass:[NSArray class]] && apps.count > 0) {
         appTargetSet = [NSSet setWithArray:apps];
     } else {
         appTargetSet = [NSSet setWithObject:@"com.alipay.iphoneclient"];
     }
-
-    NSArray *daemons = prefs[@"daemonTargets"];
-    if ([daemons isKindOfClass:[NSArray class]]) {
-        daemonTargets = daemons;
-    } else {
-        daemonTargets = @[];
-    }
 }
 
-// ── Darwin 通知 ──
 static void PrefsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     LoadPrefs();
 }
@@ -36,17 +27,23 @@ static void PrefsChanged(CFNotificationCenterRef center, void *observer, CFStrin
 
     LoadPrefs();
 
-    // Daemon 自裁：注入了就是目标，直接退出
-    if ([daemonTargets containsObject:bid]) {
-        exit(0);
-    }
+    if (![appTargetSet containsObject:bid]) return;
 
-    // App 切后台自裁
+    // 切后台：延迟 60 秒后杀
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification
         object:nil queue:nil usingBlock:^(NSNotification *note) {
-            NSString *myBID = [[NSBundle mainBundle] bundleIdentifier];
-            if (myBID && [appTargetSet containsObject:myBID]) {
-                exit(0);
+            if (pendingKill) dispatch_block_cancel(pendingKill);
+            pendingKill = dispatch_block_create(0, ^{ exit(0); });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, KILL_DELAY * NSEC_PER_SEC),
+                dispatch_get_main_queue(), pendingKill);
+        }];
+
+    // 回前台：取消延迟杀
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification
+        object:nil queue:nil usingBlock:^(NSNotification *note) {
+            if (pendingKill) {
+                dispatch_block_cancel(pendingKill);
+                pendingKill = nil;
             }
         }];
 
