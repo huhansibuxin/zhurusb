@@ -51,6 +51,7 @@ jobs:
       - name: Build
         run: |
           export THEOS=~/theos
+          chmod 755 layout/DEBIAN/postinst
           make package FINALPACKAGE=1
 
       - name: Upload deb
