@@ -51,7 +51,6 @@ jobs:
       - name: Build
         run: |
           export THEOS=~/theos
-          rm -rf ~/Library/Caches/org.llvm.clang/ModuleCache
           make package FINALPACKAGE=1
 
       - name: Upload deb
