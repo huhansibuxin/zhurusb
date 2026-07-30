@@ -3,7 +3,7 @@
 #import <UIKit/UIKit.h>
 #import <signal.h>
 #import <time.h>
-#import <os/lock.h>
+#import <libkern/OSAtomic.h>
 
 @class RBSProcessHandle;
 @class RBSProcessMonitor;
@@ -17,7 +17,7 @@ static NSString *const AlipayBundleID = @"com.alipay.iphoneclient";
 #define BLOCK_DURATION     120
 
 static dispatch_queue_t sb_block_alipay_queue;
-static os_unfair_lock floodLock = OS_UNFAIR_LOCK_INIT;
+static OSSpinLock floodLock = OS_SPINLOCK_INIT;
 static time_t lastTrigger = 0;
 static int triggerCnt = 0;
 static time_t blockUntil = 0;
@@ -25,22 +25,22 @@ static NSMutableSet *processedPids;
 static id rbsMonitor = nil;
 
 static BOOL IsLocked() {
-    os_unfair_lock_lock(&floodLock);
+    OSSpinLockLock(&floodLock);
     time_t now = time(NULL);
     BOOL locked = (now < blockUntil);
-    os_unfair_lock_unlock(&floodLock);
+    OSSpinLockUnlock(&floodLock);
     return locked;
 }
 
 static void ResetFlood() {
-    os_unfair_lock_lock(&floodLock);
+    OSSpinLockLock(&floodLock);
     triggerCnt = 0;
     lastTrigger = time(NULL);
-    os_unfair_lock_unlock(&floodLock);
+    OSSpinLockUnlock(&floodLock);
 }
 
 static void FloodCheck() {
-    os_unfair_lock_lock(&floodLock);
+    OSSpinLockLock(&floodLock);
     time_t now = time(NULL);
     if (now - lastTrigger > FLOOD_INTERVAL) {
         triggerCnt = 0;
@@ -51,7 +51,7 @@ static void FloodCheck() {
         blockUntil = now + BLOCK_DURATION;
         NSLog(@"[SB] 频繁唤醒触发限流，封锁%ds", BLOCK_DURATION);
     }
-    os_unfair_lock_unlock(&floodLock);
+    OSSpinLockUnlock(&floodLock);
 }
 
 static void SafeTerminateProcess(id handle) {
