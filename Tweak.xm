@@ -1,9 +1,8 @@
 #import <substrate.h>
 #import <UIKit/UIKit.h>
 #import <time.h>
-#import <spawn.h>
-
-extern char **environ;
+#include <sys/sysctl.h>
+#include <signal.h>
 
 #define PREFS_PATH @"/var/jb/var/mobile/Library/Preferences/com.block.procguard.prefs.plist"
 #define FLOOD_INTERVAL 3
@@ -64,14 +63,25 @@ static void KillDaemon(NSString *name) {
     if (IsFloodBlocked(name)) return;
     FloodTick(name);
 
-    pid_t pid;
-    const char *args[] = {
-        "/var/jb/usr/bin/killall",
-        "-9",
-        [name UTF8String],
-        NULL
-    };
-    posix_spawn(&pid, "/var/jb/usr/bin/killall", NULL, NULL, (char *const *)args, environ);
+    const char *targetName = [name UTF8String];
+    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t len = 0;
+
+    if (sysctl(mib, 4, NULL, &len, NULL, 0) != 0) return;
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(len);
+    if (!procs) return;
+    if (sysctl(mib, 4, procs, &len, NULL, 0) != 0) {
+        free(procs);
+        return;
+    }
+
+    int count = len / sizeof(struct kinfo_proc);
+    for (int i = 0; i < count; i++) {
+        if (strcmp(procs[i].kp_proc.p_comm, targetName) == 0) {
+            kill(procs[i].kp_proc.p_pid, SIGKILL);
+        }
+    }
+    free(procs);
 }
 
 // ── 切后台回调 ──

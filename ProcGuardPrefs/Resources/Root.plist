@@ -28,7 +28,7 @@
 			<key>label</key>
 			<string>系统守护</string>
 			<key>footerText</key>
-			<string>每行一个守护进程名（如 absd、accessoryd），应用切后台时同步终止。留空则只杀应用。</string>
+			<string>逗号分隔多个守护进程名（如 absd,accessoryd），应用切后台时同步终止。留空则只杀应用。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -40,7 +40,7 @@
 			<key>key</key>
 			<string>daemonTargetsText</string>
 			<key>placeholder</key>
-			<string>absd</string>
+			<string>absd,accessoryd</string>
 		</dict>
 		<dict>
 			<key>cell</key>

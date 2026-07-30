@@ -22,11 +22,11 @@
     if (!value) {
         value = specifier.properties[@"default"];
     }
-    // daemonTargetsText 从 daemonTargets 数组重建多行文本
+    // daemonTargetsText 从 daemonTargets 数组重建逗号分隔文本
     if ([key isEqualToString:@"daemonTargetsText"]) {
         NSArray *targets = prefs[@"daemonTargets"];
         if ([targets isKindOfClass:[NSArray class]] && targets.count > 0) {
-            return [targets componentsJoinedByString:@"\n"];
+            return [targets componentsJoinedByString:@","];
         }
         return @"";
     }
@@ -39,10 +39,10 @@
 
     if ([key isEqualToString:@"daemonTargetsText"]) {
         NSString *text = value;
-        NSArray *lines = [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+        NSArray *items = [text componentsSeparatedByString:@","];
         NSMutableArray *targets = [NSMutableArray array];
-        for (NSString *line in lines) {
-            NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        for (NSString *item in items) {
+            NSString *trimmed = [item stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
             if (trimmed.length > 0) {
                 [targets addObject:trimmed];
             }
