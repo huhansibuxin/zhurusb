@@ -1,10 +1,14 @@
+#import <Foundation/Foundation.h>
 #import <substrate.h>
 #import <UIKit/UIKit.h>
-#import <RunningBoardServices/RBSProcessMonitor.h>
-#import <RunningBoardServices/RBSProcessHandle.h>
-#import <RunningBoardServices/RBSProcessPredicate.h>
+#import <signal.h>
 #import <time.h>
 #import <libkern/OSAtomic.h>
+
+@class RBSProcessHandle;
+@class RBSProcessMonitor;
+@class RBSProcessMonitorConfiguration;
+@class RBSProcessPredicate;
 
 static NSString *const AlipayBundleID = @"com.alipay.iphoneclient";
 
@@ -50,30 +54,31 @@ static void FloodCheck() {
     OSSpinLockUnlock(&floodLock);
 }
 
-static void SafeTerminateProcess(RBSProcessHandle *handle) {
+static void SafeTerminateProcess(id handle) {
     if (!handle) return;
 
-    pid_t pid = [handle pid];
-    NSString *bid = [handle bundleIdentifier];
+    pid_t pid = (pid_t)((int(*)(id, SEL))objc_msgSend)(handle, @selector(pid));
+    NSString *bid = ((NSString*(*)(id, SEL))objc_msgSend)(handle, @selector(bundleIdentifier));
     if (![bid isEqualToString:AlipayBundleID]) return;
 
-    BOOL isForeground = [handle isForeground];
+    BOOL isForeground = ((BOOL(*)(id, SEL))objc_msgSend)(handle, @selector(isForeground));
     if (isForeground) {
         NSLog(@"[SB] 支付宝前台运行，跳过终止 PID:%d", pid);
         ResetFlood();
         return;
     }
 
-    if ([handle respondsToSelector:@selector(terminateForReason:description:error:)]) {
+    if (class_respondsToSelector(object_getClass(handle), @selector(terminateForReason:description:error:))) {
         NSError *error = nil;
-        BOOL success = [handle terminateForReason:4 description:@"block background suspend" error:&error];
+        BOOL success = ((BOOL(*)(id, SEL, int, NSString*, NSError**))objc_msgSend)(handle,
+            @selector(terminateForReason:description:error:), 4, @"block background suspend", &error);
         if (success) {
             NSLog(@"[SB] 成功终止支付宝后台进程 PID:%d", pid);
         } else {
             NSLog(@"[SB] 终止失败: %@ (PID:%d)", error.localizedDescription, pid);
         }
     } else {
-        NSLog(@"[SB] RBS接口不兼容，无法终止 PID:%d", pid);
+        if (pid > 0) kill(pid, SIGKILL);
     }
 }
 
@@ -99,21 +104,22 @@ static void SafeTerminateProcess(RBSProcessHandle *handle) {
         Class RBSPredicateCls = objc_getClass("RBSProcessPredicate");
 
         if (!RBSMonitorCls || !RBSConfigCls || !RBSPredicateCls) {
-            NSLog(@"[SB] RBS类不可用，无法启动监视器");
+            NSLog(@"[SB] RBS类不可用");
             return;
         }
 
-        id predicate = [RBSPredicateCls predicateMatchingBundleID:AlipayBundleID];
+        id predicate = ((id(*)(id, SEL, NSString*))objc_msgSend)(RBSPredicateCls,
+            @selector(predicateMatchingBundleID:), AlipayBundleID);
         if (!predicate) {
             NSLog(@"[SB] 创建RBS谓词失败");
             return;
         }
 
-        id config = [[RBSConfigCls alloc] init];
-        [config setPredicate:predicate];
-        [config setEventHandler:^(RBSProcessHandle *handle) {
+        id config = ((id(*)(id, SEL))objc_msgSend)([RBSConfigCls alloc], @selector(init));
+        ((void(*)(id, SEL, id))objc_msgSend)(config, @selector(setPredicate:), predicate);
+        ((void(*)(id, SEL, id))objc_msgSend)(config, @selector(setEventHandler:), ^(id handle) {
             if (!handle) return;
-            pid_t pid = [handle pid];
+            pid_t pid = (pid_t)((int(*)(id, SEL))objc_msgSend)(handle, @selector(pid));
 
             dispatch_async(sb_block_alipay_queue, ^{
                 if ([processedPids containsObject:@(pid)]) return;
@@ -128,18 +134,20 @@ static void SafeTerminateProcess(RBSProcessHandle *handle) {
                         [processedPids removeObject:@(pid)];
                     });
             });
-        }];
+        });
 
-        rbsMonitor = [[RBSMonitorCls alloc] initWithConfiguration:config];
-        [rbsMonitor start];
+        id monitor = ((id(*)(id, SEL, id))objc_msgSend)([RBSMonitorCls alloc],
+            @selector(initWithConfiguration:), config);
+        ((void(*)(id, SEL))objc_msgSend)(monitor, @selector(start));
+        rbsMonitor = monitor;
         NSLog(@"[BlockAlipaySB] RBS监视器启动成功");
     });
 }
 
 %dtor {
     dispatch_async(sb_block_alipay_queue, ^{
-        if (rbsMonitor && [rbsMonitor respondsToSelector:@selector(stop)]) {
-            [rbsMonitor stop];
+        if (rbsMonitor && class_respondsToSelector(object_getClass(rbsMonitor), @selector(stop))) {
+            ((void(*)(id, SEL))objc_msgSend)(rbsMonitor, @selector(stop));
             NSLog(@"[SB] RBS监视器已停止");
         }
         rbsMonitor = nil;

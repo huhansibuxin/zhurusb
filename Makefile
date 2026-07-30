@@ -10,7 +10,6 @@ ProcGuard_FILES = Tweak.xm
 ProcGuard_CFLAGS = -fobjc-arc -D'_PTHREAD_MUTEX_SIG_init=0' -D'_PTHREAD_COND_SIG_init=0'
 ProcGuard_LIBRARIES = substrate
 ProcGuard_LDFLAGS = -Wl,-undefined,dynamic_lookup
-ProcGuard_PRIVATE_FRAMEWORKS = RunningBoardServices
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 SUBPROJECTS += ProcGuardPrefs
