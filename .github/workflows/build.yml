@@ -12,12 +12,19 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install theos
+      - name: Clone theos
         run: |
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+          export THEOS=$HOME/theos
+          git clone --depth 1 https://github.com/theos/theos.git $THEOS
+          cd $THEOS
+          git submodule update --init --recursive --depth 1
+
+      - name: Install ldid
+        run: brew install ldid
 
       - name: Download SDK
         run: |
+          mkdir -p $HOME/theos/sdks
           curl -fSL "https://github.com/theos/sdks/archive/refs/heads/master.zip" -o /tmp/sdks-master.zip
           unzip -q /tmp/sdks-master.zip -d /tmp/sdks-tmp
           # 查找 iPhoneOS SDK（优先 .sdk 目录，兜底 .tar.xz）
