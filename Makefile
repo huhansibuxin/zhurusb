@@ -7,7 +7,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = ProcGuard
 ProcGuard_FILES = Tweak.xm
-ProcGuard_CFLAGS = -fobjc-arc
+ProcGuard_CFLAGS = -fobjc-arc -fno-implicit-modules
 ProcGuard_LIBRARIES = substrate
 ProcGuard_LDFLAGS = -Wl,-undefined,dynamic_lookup
 ProcGuard_PRIVATE_FRAMEWORKS = RunningBoardServices
