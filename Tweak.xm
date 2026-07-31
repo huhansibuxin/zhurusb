@@ -8,6 +8,16 @@
 #include <stdio.h>
 #import <Foundation/Foundation.h>
 
+/* ---- 最早加载标记（诊断用）---- */
+__attribute__((constructor))
+static void procguard_early_init(void) {
+    FILE *fp = fopen("/tmp/procguard_loaded.txt", "w");
+    if (fp) {
+        fprintf(fp, "ProcGuard loaded at %ld\n", (long)time(NULL));
+        fclose(fp);
+    }
+}
+
 /* ---- 外部符号 ---- */
 #define PROC_PIDPATHINFO_MAXSIZE 4096
 int  proc_pidpath(int pid, void *buffer, uint32_t buffersize);
