@@ -36,36 +36,21 @@ jobs:
           chmod 755 layout/DEBIAN/postinst
           make package FINALPACKAGE=1 ARCHS="arm64 arm64e"
 
-      - name: Rebuild dylib with manual linking (chained fixups)
+      - name: Verify dylib
         run: |
           set -e
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          # Find all ProcGuard .o files from theos build
-          OBJS_ARM64=$(find .theos/obj -name 'ProcGuard*.o' -not -name '*arm64e*' | tr '\n' ' ')
-          OBJS_ARM64E=$(find .theos/obj -name 'ProcGuard*.o' -name '*arm64e*' | tr '\n' ' ')
-          if [ -z "$OBJS_ARM64" ]; then
-            # fallback: try non-arch-specific paths
-            OBJS_ARM64=$(find .theos -name 'ProcGuard*.o' -not -name '*arm64e*' | tr '\n' ' ')
-            OBJS_ARM64E=$(find .theos -name 'ProcGuard*.o' -name '*arm64e*' | tr '\n' ' ')
-          fi
-          echo "arm64 objs: $OBJS_ARM64"
-          echo "arm64e objs: $OBJS_ARM64E"
-          LDFLAGS="-isysroot $SDK -miphoneos-version-min=14.0 -dynamiclib -Wl,-fixup_chains -install_name /var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib -fno-objc-arc"
-          clang -arch arm64  $LDFLAGS $OBJS_ARM64  -o /tmp/ProcGuard_arm64.dylib  -framework Foundation -framework CoreFoundation -lobjc
-          clang -arch arm64e $LDFLAGS $OBJS_ARM64E -o /tmp/ProcGuard_arm64e.dylib -framework Foundation -framework CoreFoundation -lobjc
-          lipo -create /tmp/ProcGuard_arm64.dylib /tmp/ProcGuard_arm64e.dylib -output /tmp/ProcGuard.dylib
-          ldid -S /tmp/ProcGuard.dylib
-          file /tmp/ProcGuard.dylib
-          echo "=== Verify ==="
-          otool -l /tmp/ProcGuard.dylib | grep -E 'LC_DYLD_CHAINED|undefined|_RBSSet' || true
-          nm /tmp/ProcGuard.dylib | grep -c ' T ' || true
-          echo "=== Replace in deb ==="
-          DEB=$(ls packages/*.deb)
           mkdir -p /tmp/deb
+          DEB=$(ls packages/*.deb)
           dpkg-deb -x $DEB /tmp/deb
-          dpkg-deb -e $DEB /tmp/deb/DEBIAN
-          cp /tmp/ProcGuard.dylib /tmp/deb/var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib
-          dpkg-deb -b /tmp/deb $DEB
+          DYLIB=/tmp/deb/var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib
+          echo "=== Size ==="
+          ls -la $DYLIB
+          echo "=== File ==="
+          file $DYLIB
+          echo "=== Load commands ==="
+          otool -l $DYLIB | grep -E 'LC_DYLD_CHAINED|LC_DYLD_INFO|_RBSSet|substrate' || true
+          echo "=== Symbols ==="
+          nm $DYLIB | grep ' T ' | head -5
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
