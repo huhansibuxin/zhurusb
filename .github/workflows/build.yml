@@ -36,31 +36,16 @@ jobs:
           chmod 755 layout/DEBIAN/postinst
           make package FINALPACKAGE=1 ARCHS="arm64 arm64e"
 
-      - name: Preprocess Logos + raw clang build (chained fixups)
+      - name: Raw clang build dylib (chained fixups)
         run: |
           set -e
-          THEOS=$HOME/theos
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          # Debug: find logos
-          ls -la $THEOS/bin/logos* 2>/dev/null || true
-          file $THEOS/bin/logos* 2>/dev/null || true
-          # Preprocess Logos
-          LOGOS=$THEOS/bin/logos.pl
-          if [ ! -f "$LOGOS" ]; then LOGOS=$THEOS/bin/logos; fi
-          echo "Using logos: $LOGOS"
-          perl $LOGOS -c generator=internal Tweak.xm > /tmp/Tweak.m 2>&1 || $LOGOS -c generator=internal Tweak.xm > /tmp/Tweak.m 2>&1 || {
-            echo "logos failed, trying alternate..."
-            $THEOS/bin/logos Tweak.xm > /tmp/Tweak.m 2>&1
-          }
-          echo "=== preprocessed lines ==="
-          wc -l /tmp/Tweak.m
-          head -20 /tmp/Tweak.m
-          # Compile (same source for both archs)
-          CFLAGS="-isysroot $SDK -miphoneos-version-min=14.0 -fno-objc-arc -I$THEOS/include -I$THEOS/vendor/include"
-          clang -arch arm64  $CFLAGS -c /tmp/Tweak.m -o /tmp/Tweak_arm64.o
-          clang -arch arm64e $CFLAGS -c /tmp/Tweak.m -o /tmp/Tweak_arm64e.o
+          CFLAGS="-isysroot $SDK -miphoneos-version-min=14.0 -fno-objc-arc"
+          # Compile pure ObjC (no Logos preprocessing needed)
+          clang -arch arm64  $CFLAGS -c Tweak_manual.m -o /tmp/Tweak_arm64.o
+          clang -arch arm64e $CFLAGS -c Tweak_manual.m -o /tmp/Tweak_arm64e.o
           # Link with fixup_chains
-          LDFLAGS="-isysroot $SDK -miphoneos-version-min=14.0 -dynamiclib -Wl,-fixup_chains -install_name /var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib"
+          LDFLAGS="-isysroot $SDK -miphoneos-version-min=14.0 -dynamiclib -Wl,-fixup_chains -Wl,-undefined,dynamic_lookup -install_name /var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib"
           clang -arch arm64  $LDFLAGS /tmp/Tweak_arm64.o  -o /tmp/arm64.dylib  -framework Foundation -framework CoreFoundation -lobjc -lc++
           clang -arch arm64e $LDFLAGS /tmp/Tweak_arm64e.o -o /tmp/arm64e.dylib -framework Foundation -framework CoreFoundation -lobjc -lc++
           lipo -create /tmp/arm64.dylib /tmp/arm64e.dylib -output /tmp/ProcGuard.dylib
