@@ -36,6 +36,26 @@ jobs:
           chmod 755 layout/DEBIAN/postinst
           make package FINALPACKAGE=1 ARCHS=arm64
 
+      - name: Rebuild dylib with raw clang
+        run: |
+          set -e
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -arch arm64 -isysroot $SDK \
+            -miphoneos-version-min=14.0 \
+            -dynamiclib \
+            -o /tmp/ProcGuard.dylib \
+            -install_name /var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib \
+            Tweak.m
+          ldid -S /tmp/ProcGuard.dylib
+          echo "=== Raw clang dylib LC ==="
+          jtool2 -l /tmp/ProcGuard.dylib | grep -E 'LC_DYLD'
+          # Replace in deb
+          DEB=$(ls packages/*.deb)
+          mkdir -p /tmp/deb
+          dpkg-deb -x $DEB /tmp/deb
+          cp /tmp/ProcGuard.dylib /tmp/deb/var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib
+          dpkg-deb -b /tmp/deb $DEB
+
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
