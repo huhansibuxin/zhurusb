@@ -41,11 +41,10 @@ jobs:
           set -e
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           CFLAGS="-isysroot $SDK -fno-objc-arc"
-          # Compile arm64e only (rootless devices are all arm64e)
-          clang -target arm64e-apple-ios14.0 $CFLAGS -c Tweak_manual.m -o /tmp/Tweak_arm64e.o
-          # Link with fixup_chains
+          # arm64e only, iOS 13.0 target to force __mod_init_func over __init_offsets
+          clang -target arm64e-apple-ios13.0 $CFLAGS -c Tweak_manual.m -o /tmp/Tweak_arm64e.o
           LDFLAGS="-isysroot $SDK -dynamiclib -Wl,-fixup_chains -Wl,-undefined,dynamic_lookup -install_name /var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib"
-          clang -target arm64e-apple-ios14.0 $LDFLAGS /tmp/Tweak_arm64e.o -o /tmp/ProcGuard.dylib -framework Foundation -framework CoreFoundation -lobjc -lc++
+          clang -target arm64e-apple-ios13.0 $LDFLAGS /tmp/Tweak_arm64e.o -o /tmp/ProcGuard.dylib -framework Foundation -framework CoreFoundation -lobjc -lc++
           ldid -S /tmp/ProcGuard.dylib
           echo "=== Verify ==="
           file /tmp/ProcGuard.dylib
