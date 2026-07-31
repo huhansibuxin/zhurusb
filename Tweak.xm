@@ -1,9 +1,4 @@
-/* 手动声明 substrate API，避免 #include <substrate.h> 触发 CydiaSubstrate→MachO 模块链编译失败 */
-extern "C" {
-void  MSHookFunction(void *symbol, void *hook, void **old);
-void *MSFindSymbol(void *image, const char *name);
-}
-
+#include <objc/runtime.h>
 #include <sys/types.h>
 #include <time.h>
 #include <pthread.h>
@@ -11,11 +6,6 @@ void *MSFindSymbol(void *image, const char *name);
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-
-/* ---- 手动声明 objc_msgSend，避免引入 objc/message.h（与 ARC 类型检查冲突） ---- */
-OBJC_EXTERN id    objc_msgSend(id self, SEL op, ...);
-OBJC_EXTERN Class objc_getClass(const char *name);
-OBJC_EXTERN SEL   sel_registerName(const char *str);
 
 /* ---- 外部符号 ---- */
 #define PROC_PIDPATHINFO_MAXSIZE 4096
@@ -46,9 +36,6 @@ static pthread_t       g_worker = 0;
 static char *g_match_names[MAX_MONITOR];
 static int   g_match_count = 0;
 
-/* ---- Hook ---- */
-static void (*orig_RBSSetForegroundProcessPID)(pid_t pid, int state);
-
 /* ==================== 工具 ==================== */
 
 static int find_by_pid(pid_t pid) {
@@ -70,6 +57,71 @@ static const char *match_app(const char *path) {
     return NULL;
 }
 
+/* ==================== 偏好加载 ==================== */
+
+static void resolve_bundle_to_name(const char *bundleID, char *out, size_t out_len) {
+    NSString *nsBid = [NSString stringWithUTF8String:bundleID];
+    if (!nsBid) return;
+
+    id proxy = [NSClassFromString(@"LSApplicationProxy")
+                applicationProxyForIdentifier:nsBid];
+    if (!proxy) return;
+
+    NSURL *bundleURL = [proxy bundleURL];
+    if (!bundleURL) return;
+
+    NSString *appDir  = [bundleURL lastPathComponent];
+    NSString *appName = [appDir stringByDeletingPathExtension];
+
+    const char *name = [appName UTF8String];
+    if (name && strlen(name) > 0) {
+        strncpy(out, name, out_len - 1);
+    }
+}
+
+static void load_preferences(void) {
+    pthread_mutex_lock(&g_lock);
+    for (int i = 0; i < g_match_count; i++) free(g_match_names[i]);
+    g_match_count = 0;
+    pthread_mutex_unlock(&g_lock);
+
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:@PREFS_FILE];
+    NSArray *bundles = prefs ? prefs[@"appTargets"] : nil;
+
+    if (!bundles || [bundles count] == 0) {
+        size_t len = strlen(DEFAULT_APP_NAME) + 16;
+        g_match_names[0] = (char *)malloc(len);
+        snprintf(g_match_names[0], len, "/%s.app/", DEFAULT_APP_NAME);
+        g_match_count = 1;
+        printf("[ProcGuard] 无偏好设置，默认监控: %s\n", DEFAULT_APP_NAME);
+        return;
+    }
+
+    int count = (int)[bundles count];
+    printf("[ProcGuard] 偏好中有 %d 个 App\n", count);
+
+    for (int i = 0; i < count && g_match_count < MAX_MONITOR; i++) {
+        NSString *bid = bundles[i];
+        if (!bid || [bid length] == 0) continue;
+
+        const char *bidStr = [bid UTF8String];
+        char appName[64] = {0};
+        resolve_bundle_to_name(bidStr, appName, sizeof(appName));
+        if (strlen(appName) == 0) {
+            printf("[ProcGuard] 跳过无法解析: %s\n", bidStr);
+            continue;
+        }
+
+        size_t len = strlen(appName) + 16;
+        g_match_names[g_match_count] = (char *)malloc(len);
+        snprintf(g_match_names[g_match_count], len, "/%s.app/", appName);
+        printf("[ProcGuard] %s → %s\n", bidStr, appName);
+        g_match_count++;
+    }
+
+    printf("[ProcGuard] 已加载 %d 个监控目标\n", g_match_count);
+}
+
 /* ==================== 监控线程 ==================== */
 
 static void *worker(void *arg) {
@@ -78,15 +130,9 @@ static void *worker(void *arg) {
     while (1) {
         sleep(SCAN_INTERVAL);
 
-        /* 定期重载偏好 */
         time_t now = time(NULL);
         if (now - last_reload >= PREFS_RELOAD_SEC) {
             last_reload = now;
-            pthread_mutex_lock(&g_lock);
-            for (int i = 0; i < g_match_count; i++) free(g_match_names[i]);
-            g_match_count = 0;
-            pthread_mutex_unlock(&g_lock);
-            extern void load_preferences(void);
             load_preferences();
         }
 
@@ -109,8 +155,9 @@ static void *worker(void *arg) {
 
 /* ==================== Hook ==================== */
 
-static void hook_RBSSetForegroundProcessPID(pid_t pid, int state) {
-    orig_RBSSetForegroundProcessPID(pid, state);
+%hookf(void, _RBSSetForegroundProcessPID, pid_t pid, int state) {
+    %orig;
+
     if (pid <= 0) return;
 
     pthread_mutex_lock(&g_lock);
@@ -152,82 +199,6 @@ static void hook_RBSSetForegroundProcessPID(pid_t pid, int state) {
     pthread_mutex_unlock(&g_lock);
 }
 
-/* ==================== 偏好加载（纯 objc_msgSend，零 CoreFoundation） ==================== */
-
-/* objc_msgSend 快捷宏 */
-#define msg(OBJ, SEL, ...)  ((id(*)(id, SEL, ##__VA_ARGS__))objc_msgSend)((id)(OBJ), sel_registerName(SEL), ##__VA_ARGS__)
-#define msg_i(OBJ, SEL)     ((int(*)(id, SEL))objc_msgSend)((id)(OBJ), sel_registerName(SEL))
-#define msg_cstr(OBJ, SEL)  ((const char*(*)(id, SEL))objc_msgSend)((id)(OBJ), sel_registerName(SEL))
-
-static void resolve_bundle_to_name(const char *bundleID, char *out, size_t out_len) {
-    /* NSString *nsBid = [NSString stringWithUTF8String:bundleID] */
-    id nsBid = msg(objc_getClass("NSString"), "stringWithUTF8String:", bundleID);
-    if (!nsBid) return;
-
-    /* LSApplicationProxy *proxy = [LSApplicationProxy applicationProxyForIdentifier:nsBid] */
-    id proxy = msg(objc_getClass("LSApplicationProxy"), "applicationProxyForIdentifier:", nsBid);
-    if (!proxy) return;
-
-    /* NSURL *bundleURL = [proxy bundleURL] */
-    id bundleURL = msg(proxy, "bundleURL");
-    if (!bundleURL) return;
-
-    /* "AlipayWallet.app" → "AlipayWallet" */
-    id appDir  = msg(bundleURL, "lastPathComponent");
-    id appName = msg(appDir, "stringByDeletingPathExtension");
-
-    const char *name = msg_cstr(appName, "UTF8String");
-    if (name && strlen(name) > 0) {
-        strncpy(out, name, out_len - 1);
-    }
-}
-
-void load_preferences(void) {
-    /* NSString *path = @PREFS_FILE */
-    id nsPath = msg(objc_getClass("NSString"), "stringWithUTF8String:", PREFS_FILE);
-
-    /* NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:path] */
-    id prefs = msg(objc_getClass("NSDictionary"), "dictionaryWithContentsOfFile:", nsPath);
-
-    /* NSArray *bundles = prefs[@"appTargets"] */
-    id bundles = prefs ? msg(prefs, "objectForKey:", msg(objc_getClass("NSString"), "stringWithUTF8String:", "appTargets")) : nil;
-
-    if (!bundles) {
-        size_t len = strlen(DEFAULT_APP_NAME) + 16;
-        g_match_names[0] = (char *)malloc(len);
-        snprintf(g_match_names[0], len, "/%s.app/", DEFAULT_APP_NAME);
-        g_match_count = 1;
-        printf("[ProcGuard] 无偏好设置，默认监控: %s\n", DEFAULT_APP_NAME);
-        return;
-    }
-
-    int count = msg_i(bundles, "count");
-    printf("[ProcGuard] 偏好中有 %d 个 App\n", count);
-
-    for (int i = 0; i < count && g_match_count < MAX_MONITOR; i++) {
-        id bid = msg(bundles, "objectAtIndex:", (long)i);
-        if (!bid) continue;
-
-        const char *bidStr = msg_cstr(bid, "UTF8String");
-        if (!bidStr || strlen(bidStr) == 0) continue;
-
-        char appName[64] = {0};
-        resolve_bundle_to_name(bidStr, appName, sizeof(appName));
-        if (strlen(appName) == 0) {
-            printf("[ProcGuard] 跳过无法解析: %s\n", bidStr);
-            continue;
-        }
-
-        size_t len = strlen(appName) + 16;
-        g_match_names[g_match_count] = (char *)malloc(len);
-        snprintf(g_match_names[g_match_count], len, "/%s.app/", appName);
-        printf("[ProcGuard] %s → %s\n", bidStr, appName);
-        g_match_count++;
-    }
-
-    printf("[ProcGuard] 已加载 %d 个监控目标\n", g_match_count);
-}
-
 /* ==================== %ctor / %dtor ==================== */
 
 %ctor {
@@ -238,11 +209,6 @@ void load_preferences(void) {
         printf("[ProcGuard] 监控线程已启动\n");
     }
 
-    MSHookFunction(
-        MSFindSymbol(NULL, "_RBSSetForegroundProcessPID"),
-        (void *)hook_RBSSetForegroundProcessPID,
-        (void **)&orig_RBSSetForegroundProcessPID
-    );
     printf("[ProcGuard] Hook _RBSSetForegroundProcessPID 成功\n");
 }
 
