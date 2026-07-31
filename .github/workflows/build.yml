@@ -40,14 +40,14 @@ jobs:
         run: |
           set -e
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          CFLAGS="-isysroot $SDK -miphoneos-version-min=14.0 -fno-objc-arc"
-          # Compile pure ObjC (no Logos preprocessing needed)
-          clang -arch arm64  $CFLAGS -c Tweak_manual.m -o /tmp/Tweak_arm64.o
-          clang -arch arm64e $CFLAGS -c Tweak_manual.m -o /tmp/Tweak_arm64e.o
+          CFLAGS="-isysroot $SDK -fno-objc-arc"
+          # Compile pure ObjC with explicit iOS target (ensures __mod_init_func over __init_offsets)
+          clang -target arm64-apple-ios14.0  $CFLAGS -c Tweak_manual.m -o /tmp/Tweak_arm64.o
+          clang -target arm64e-apple-ios14.0 $CFLAGS -c Tweak_manual.m -o /tmp/Tweak_arm64e.o
           # Link with fixup_chains
-          LDFLAGS="-isysroot $SDK -miphoneos-version-min=14.0 -dynamiclib -Wl,-fixup_chains -Wl,-undefined,dynamic_lookup -install_name /var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib"
-          clang -arch arm64  $LDFLAGS /tmp/Tweak_arm64.o  -o /tmp/arm64.dylib  -framework Foundation -framework CoreFoundation -lobjc -lc++
-          clang -arch arm64e $LDFLAGS /tmp/Tweak_arm64e.o -o /tmp/arm64e.dylib -framework Foundation -framework CoreFoundation -lobjc -lc++
+          LDFLAGS="-isysroot $SDK -dynamiclib -Wl,-fixup_chains -Wl,-undefined,dynamic_lookup -install_name /var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib"
+          clang -target arm64-apple-ios14.0  $LDFLAGS /tmp/Tweak_arm64.o  -o /tmp/arm64.dylib  -framework Foundation -framework CoreFoundation -lobjc -lc++
+          clang -target arm64e-apple-ios14.0 $LDFLAGS /tmp/Tweak_arm64e.o -o /tmp/arm64e.dylib -framework Foundation -framework CoreFoundation -lobjc -lc++
           lipo -create /tmp/arm64.dylib /tmp/arm64e.dylib -output /tmp/ProcGuard.dylib
           ldid -S /tmp/ProcGuard.dylib
           echo "=== Verify ==="
