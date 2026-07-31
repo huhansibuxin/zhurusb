@@ -3,7 +3,9 @@
 #import <signal.h>
 #import <time.h>
 #import <os/lock.h>
-#import <libproc.h>
+#define PROC_PIDPATHINFO_MAXSIZE 4096
+int proc_listallpids(void *buffer, int buffersize);
+int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 #define SCAN_INTERVAL_SEC  2
 #define FLOOD_INTERVAL     3
