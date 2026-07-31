@@ -66,7 +66,10 @@ static void resolve_bundle_to_name(const char *bundleID, char *out, size_t out_l
     if (!nsBid) return;
 
     Class LSAppProxy = NSClassFromString(@"LSApplicationProxy");
-    id proxy = [LSAppProxy performSelector:@selector(applicationProxyForIdentifier:) withObject:nsBid];
+    if (!LSAppProxy) return;
+    SEL sel = @selector(applicationProxyForIdentifier:);
+    if (![LSAppProxy respondsToSelector:sel]) return;
+    id proxy = [LSAppProxy performSelector:sel withObject:nsBid];
     if (!proxy) return;
 
     NSURL *bundleURL = [proxy bundleURL];
@@ -82,44 +85,49 @@ static void resolve_bundle_to_name(const char *bundleID, char *out, size_t out_l
 }
 
 static void load_preferences(void) {
-    pthread_mutex_lock(&g_lock);
-    for (int i = 0; i < g_match_count; i++) free(g_match_names[i]);
-    g_match_count = 0;
-    pthread_mutex_unlock(&g_lock);
+    /* 先在本地构建新列表，最后原子替换，避免长时间持锁阻塞 hook 线程 */
+    char *new_names[MAX_MONITOR];
+    int   new_count = 0;
 
     NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:@PREFS_FILE];
     NSArray *bundles = prefs ? prefs[@"appTargets"] : nil;
 
     if (!bundles || [bundles count] == 0) {
         size_t len = strlen(DEFAULT_APP_NAME) + 16;
-        g_match_names[0] = (char *)malloc(len);
-        snprintf(g_match_names[0], len, "/%s.app/", DEFAULT_APP_NAME);
-        g_match_count = 1;
+        new_names[0] = (char *)malloc(len);
+        snprintf(new_names[0], len, "/%s.app/", DEFAULT_APP_NAME);
+        new_count = 1;
         printf("[ProcGuard] 无偏好设置，默认监控: %s\n", DEFAULT_APP_NAME);
-        return;
-    }
+    } else {
+        int count = (int)[bundles count];
+        printf("[ProcGuard] 偏好中有 %d 个 App\n", count);
 
-    int count = (int)[bundles count];
-    printf("[ProcGuard] 偏好中有 %d 个 App\n", count);
+        for (int i = 0; i < count && new_count < MAX_MONITOR; i++) {
+            NSString *bid = bundles[i];
+            if (!bid || [bid length] == 0) continue;
 
-    for (int i = 0; i < count && g_match_count < MAX_MONITOR; i++) {
-        NSString *bid = bundles[i];
-        if (!bid || [bid length] == 0) continue;
+            const char *bidStr = [bid UTF8String];
+            char appName[64] = {0};
+            resolve_bundle_to_name(bidStr, appName, sizeof(appName));
+            if (strlen(appName) == 0) {
+                printf("[ProcGuard] 跳过无法解析: %s\n", bidStr);
+                continue;
+            }
 
-        const char *bidStr = [bid UTF8String];
-        char appName[64] = {0};
-        resolve_bundle_to_name(bidStr, appName, sizeof(appName));
-        if (strlen(appName) == 0) {
-            printf("[ProcGuard] 跳过无法解析: %s\n", bidStr);
-            continue;
+            size_t len = strlen(appName) + 16;
+            new_names[new_count] = (char *)malloc(len);
+            snprintf(new_names[new_count], len, "/%s.app/", appName);
+            printf("[ProcGuard] %s → %s\n", bidStr, appName);
+            new_count++;
         }
-
-        size_t len = strlen(appName) + 16;
-        g_match_names[g_match_count] = (char *)malloc(len);
-        snprintf(g_match_names[g_match_count], len, "/%s.app/", appName);
-        printf("[ProcGuard] %s → %s\n", bidStr, appName);
-        g_match_count++;
     }
+
+    /* 原子替换 */
+    pthread_mutex_lock(&g_lock);
+    for (int i = 0; i < g_match_count; i++) free(g_match_names[i]);
+    memcpy(g_match_names, new_names, new_count * sizeof(char *));
+    g_match_count = new_count;
+    pthread_mutex_unlock(&g_lock);
 
     printf("[ProcGuard] 已加载 %d 个监控目标\n", g_match_count);
 }

@@ -2,8 +2,8 @@ Package: com.block.procguard
 Name: ProcGuard
 Version: 2.0
 Architecture: iphoneos-arm64
-Depends: mobilesubstrate, firmware (>= 16.0)
-Description: SpringBoard进程守护管理器 | RBS原生终止 + 洪水限流 + 设置面板自定义目标
+Depends: ellekit, firmware (>= 16.0)
+Description: runningboardd注入进程守护 | RBS原生终止 + 偏好设置自定义目标
 Maintainer: Dev
 Author: Dev
 Section: Tweaks
