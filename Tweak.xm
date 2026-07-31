@@ -6,11 +6,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#import <Foundation/Foundation.h>
 
 /* ---- 外部符号 ---- */
 #define PROC_PIDPATHINFO_MAXSIZE 4096
 int  proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 void RBSProcessTerminate(pid_t pid, int reason, const char *description);
+extern void _RBSSetForegroundProcessPID(pid_t pid, int state);
 
 /* ---- 配置 ---- */
 #define PREFS_FILE         "/var/mobile/Library/Preferences/com.block.procguard.prefs.plist"
