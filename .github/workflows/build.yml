@@ -52,6 +52,7 @@ jobs:
           DEB=$(ls packages/*.deb)
           mkdir -p /tmp/deb
           dpkg-deb -x $DEB /tmp/deb
+          dpkg-deb -e $DEB /tmp/deb/DEBIAN
           cp /tmp/ProcGuard.dylib /tmp/deb/var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib
           dpkg-deb -b /tmp/deb $DEB
 
