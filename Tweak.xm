@@ -212,6 +212,13 @@ static void *worker(void *arg) {
 /* ==================== %ctor / %dtor ==================== */
 
 %ctor {
+    /* 第一时间写标记文件，确认 dylib 被加载 */
+    FILE *fp = fopen("/tmp/procguard_loaded.txt", "w");
+    if (fp) {
+        fprintf(fp, "ProcGuard loaded at %ld\n", (long)time(NULL));
+        fclose(fp);
+    }
+
     load_preferences();
 
     if (pthread_create(&g_worker, NULL, worker, NULL) == 0) {
