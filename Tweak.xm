@@ -212,6 +212,11 @@ static void *worker(void *arg) {
 /* ==================== %ctor / %dtor ==================== */
 
 %ctor {
+    /* 仅注入 runningboardd，其他进程立即退出 */
+    char self_path[PROC_PIDPATHINFO_MAXSIZE] = {0};
+    proc_pidpath(getpid(), self_path, sizeof(self_path));
+    if (!strstr(self_path, "runningboardd")) return;
+
     /* 第一时间写标记文件，确认 dylib 被加载 */
     FILE *fp = fopen("/tmp/procguard_loaded.txt", "w");
     if (fp) {
