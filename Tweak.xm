@@ -65,7 +65,7 @@ static void resolve_bundle_to_name(const char *bundleID, char *out, size_t out_l
     NSString *nsBid = [NSString stringWithUTF8String:bundleID];
     if (!nsBid) return;
 
-    id proxy = [NSClassFromString(@"LSApplicationProxy")
+    id proxy = [(id)NSClassFromString(@"LSApplicationProxy")
                 applicationProxyForIdentifier:nsBid];
     if (!proxy) return;
 
