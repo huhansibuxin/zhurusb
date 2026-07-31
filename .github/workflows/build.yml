@@ -41,10 +41,20 @@ jobs:
           set -e
           THEOS=$HOME/theos
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          # Preprocess Logos: .xm -> .m with generator=internal
-          perl $THEOS/bin/logos.pl -c generator=internal Tweak.xm > /tmp/Tweak.m
+          # Debug: find logos
+          ls -la $THEOS/bin/logos* 2>/dev/null || true
+          file $THEOS/bin/logos* 2>/dev/null || true
+          # Preprocess Logos
+          LOGOS=$THEOS/bin/logos.pl
+          if [ ! -f "$LOGOS" ]; then LOGOS=$THEOS/bin/logos; fi
+          echo "Using logos: $LOGOS"
+          perl $LOGOS -c generator=internal Tweak.xm > /tmp/Tweak.m 2>&1 || $LOGOS -c generator=internal Tweak.xm > /tmp/Tweak.m 2>&1 || {
+            echo "logos failed, trying alternate..."
+            $THEOS/bin/logos Tweak.xm > /tmp/Tweak.m 2>&1
+          }
           echo "=== preprocessed lines ==="
           wc -l /tmp/Tweak.m
+          head -20 /tmp/Tweak.m
           # Compile (same source for both archs)
           CFLAGS="-isysroot $SDK -miphoneos-version-min=14.0 -fno-objc-arc -I$THEOS/include -I$THEOS/vendor/include"
           clang -arch arm64  $CFLAGS -c /tmp/Tweak.m -o /tmp/Tweak_arm64.o
@@ -58,7 +68,6 @@ jobs:
           echo "=== Verify ==="
           file /tmp/ProcGuard.dylib
           otool -l /tmp/ProcGuard.dylib | grep -iE 'mod_init|init_off|CHAINED|DYLD_INFO' || true
-          nm /tmp/ProcGuard.dylib | grep ' T ' | head -5
           # Replace in deb
           DEB=$(ls packages/*.deb)
           mkdir -p /tmp/deb2
