@@ -39,6 +39,8 @@ jobs:
       - name: Rebuild dylib with raw clang
         run: |
           set -e
+          export THEOS=~/theos
+          export PATH="$THEOS/bin:$PATH"
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           clang -arch arm64 -isysroot $SDK \
             -miphoneos-version-min=14.0 \
