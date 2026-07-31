@@ -11,7 +11,6 @@ ProcGuard_CFLAGS = -fno-objc-arc -D'_PTHREAD_MUTEX_SIG_init=0' -D'_PTHREAD_COND_
 ProcGuard_LIBRARIES = substrate
 ProcGuard_LDFLAGS = -Wl,-undefined,dynamic_lookup
 ProcGuard_LOGOSFLAGS = -c generator=MobileSubstrate
-ProcGuard_INSTALL_PATH = /usr/lib/hooks
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 SUBPROJECTS += ProcGuardPrefs
