@@ -1,5 +1,4 @@
 #include <substrate.h>
-#include <signal.h>
 #include <sys/types.h>
 #include <time.h>
 #include <pthread.h>
@@ -7,9 +6,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <CoreFoundation/CoreFoundation.h>
-#include <objc/runtime.h>
-#include <objc/message.h>
+
+/* ---- 手动声明 objc_msgSend，避免引入 objc/message.h（与 ARC 类型检查冲突） ---- */
+OBJC_EXTERN id    objc_msgSend(id self, SEL op, ...);
+OBJC_EXTERN Class objc_getClass(const char *name);
+OBJC_EXTERN SEL   sel_registerName(const char *str);
 
 /* ---- 外部符号 ---- */
 #define PROC_PIDPATHINFO_MAXSIZE 4096
@@ -17,14 +18,12 @@ int  proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 void RBSProcessTerminate(pid_t pid, int reason, const char *description);
 
 /* ---- 配置 ---- */
-#define PREFS_PLIST        "/var/mobile/Library/Preferences/com.block.procguard.prefs.plist"
-#define PREFS_KEY          CFSTR("appTargets")
-#define DARWIN_NOTIFY_NAME CFSTR("com.block.procguard-prefs-changed")
-
+#define PREFS_FILE         "/var/mobile/Library/Preferences/com.block.procguard.prefs.plist"
 #define DEFAULT_BUNDLE_ID  "com.alipay.iphoneclient"
 #define DEFAULT_APP_NAME   "AlipayWallet"
 #define BACKGROUND_TIMEOUT 60
 #define SCAN_INTERVAL      1
+#define PREFS_RELOAD_SEC   5
 #define MAX_MONITOR        64
 
 /* ---- 监控结构 ---- */
@@ -70,14 +69,28 @@ static const char *match_app(const char *path) {
 
 static void *worker(void *arg) {
     (void)arg;
+    time_t last_reload = 0;
     while (1) {
         sleep(SCAN_INTERVAL);
-        pthread_mutex_lock(&g_lock);
+
+        /* 定期重载偏好 */
         time_t now = time(NULL);
+        if (now - last_reload >= PREFS_RELOAD_SEC) {
+            last_reload = now;
+            pthread_mutex_lock(&g_lock);
+            for (int i = 0; i < g_match_count; i++) free(g_match_names[i]);
+            g_match_count = 0;
+            pthread_mutex_unlock(&g_lock);
+            extern void load_preferences(void);
+            load_preferences();
+        }
+
+        pthread_mutex_lock(&g_lock);
+        time_t check_now = time(NULL);
         for (int i = 0; i < MAX_MONITOR; i++) {
             AppMonitor *m = &g_monitors[i];
             if (m->pid <= 0 || m->is_foreground) continue;
-            if ((now - m->bg_start_ts) >= BACKGROUND_TIMEOUT) {
+            if ((check_now - m->bg_start_ts) >= BACKGROUND_TIMEOUT) {
                 printf("[ProcGuard] %s 后台%ds超时, 终止 PID:%d\n",
                        m->app_name, BACKGROUND_TIMEOUT, m->pid);
                 RBSProcessTerminate(m->pid, 4, "background timeout kill");
@@ -134,89 +147,80 @@ static void hook_RBSSetForegroundProcessPID(pid_t pid, int state) {
     pthread_mutex_unlock(&g_lock);
 }
 
-/* ==================== 偏好解析 ==================== */
+/* ==================== 偏好加载（纯 objc_msgSend，零 CoreFoundation） ==================== */
+
+/* objc_msgSend 快捷宏 */
+#define msg(OBJ, SEL, ...)  ((id(*)(id, SEL, ##__VA_ARGS__))objc_msgSend)((id)(OBJ), sel_registerName(SEL), ##__VA_ARGS__)
+#define msg_i(OBJ, SEL)     ((int(*)(id, SEL))objc_msgSend)((id)(OBJ), sel_registerName(SEL))
+#define msg_cstr(OBJ, SEL)  ((const char*(*)(id, SEL))objc_msgSend)((id)(OBJ), sel_registerName(SEL))
 
 static void resolve_bundle_to_name(const char *bundleID, char *out, size_t out_len) {
-    Class nsStrCls = objc_getClass("NSString");
-    id nsBid = ((id(*)(id, SEL, const char*))objc_msgSend)(
-        ((id(*)(id, SEL))objc_msgSend)((id)nsStrCls, sel_registerName("alloc")),
-        sel_registerName("initWithUTF8String:"), bundleID
-    );
+    /* NSString *nsBid = [NSString stringWithUTF8String:bundleID] */
+    id nsBid = msg(objc_getClass("NSString"), "stringWithUTF8String:", bundleID);
+    if (!nsBid) return;
 
-    Class lsCls = objc_getClass("LSApplicationProxy");
-    id proxy = ((id(*)(id, SEL, id))objc_msgSend)(
-        (id)lsCls, sel_registerName("applicationProxyForIdentifier:"), nsBid
-    );
+    /* LSApplicationProxy *proxy = [LSApplicationProxy applicationProxyForIdentifier:nsBid] */
+    id proxy = msg(objc_getClass("LSApplicationProxy"), "applicationProxyForIdentifier:", nsBid);
     if (!proxy) return;
 
-    id bundleURL = ((id(*)(id, SEL))objc_msgSend)(proxy, sel_registerName("bundleURL"));
+    /* NSURL *bundleURL = [proxy bundleURL] */
+    id bundleURL = msg(proxy, "bundleURL");
     if (!bundleURL) return;
 
-    id appDir  = ((id(*)(id, SEL))objc_msgSend)(bundleURL, sel_registerName("lastPathComponent"));
-    id appName = ((id(*)(id, SEL))objc_msgSend)(appDir, sel_registerName("stringByDeletingPathExtension"));
+    /* "AlipayWallet.app" → "AlipayWallet" */
+    id appDir  = msg(bundleURL, "lastPathComponent");
+    id appName = msg(appDir, "stringByDeletingPathExtension");
 
-    const char *name = ((const char*(*)(id, SEL))objc_msgSend)(appName, sel_registerName("UTF8String"));
+    const char *name = msg_cstr(appName, "UTF8String");
     if (name && strlen(name) > 0) {
         strncpy(out, name, out_len - 1);
     }
 }
 
-static void load_preferences(void) {
-    CFArrayRef bundles = CFPreferencesCopyAppValue(PREFS_KEY, CFSTR("com.block.procguard.prefs"));
+void load_preferences(void) {
+    /* NSString *path = @PREFS_FILE */
+    id nsPath = msg(objc_getClass("NSString"), "stringWithUTF8String:", PREFS_FILE);
 
-    if (!bundles || CFGetTypeID(bundles) != CFArrayGetTypeID()) {
-        /* 无偏好：默认支付宝 */
+    /* NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:path] */
+    id prefs = msg(objc_getClass("NSDictionary"), "dictionaryWithContentsOfFile:", nsPath);
+
+    /* NSArray *bundles = prefs[@"appTargets"] */
+    id bundles = prefs ? msg(prefs, "objectForKey:", msg(objc_getClass("NSString"), "stringWithUTF8String:", "appTargets")) : nil;
+
+    if (!bundles) {
         size_t len = strlen(DEFAULT_APP_NAME) + 16;
-        g_match_names[0] = malloc(len);
+        g_match_names[0] = (char *)malloc(len);
         snprintf(g_match_names[0], len, "/%s.app/", DEFAULT_APP_NAME);
         g_match_count = 1;
         printf("[ProcGuard] 无偏好设置，默认监控: %s\n", DEFAULT_APP_NAME);
-        if (bundles) CFRelease(bundles);
         return;
     }
 
-    CFIndex count = CFArrayGetCount(bundles);
-    printf("[ProcGuard] 偏好中有 %ld 个 App\n", count);
+    int count = msg_i(bundles, "count");
+    printf("[ProcGuard] 偏好中有 %d 个 App\n", count);
 
-    for (CFIndex i = 0; i < count && g_match_count < MAX_MONITOR; i++) {
-        CFStringRef bid = CFArrayGetValueAtIndex(bundles, i);
-        if (CFGetTypeID(bid) != CFStringGetTypeID()) continue;
+    for (int i = 0; i < count && g_match_count < MAX_MONITOR; i++) {
+        id bid = msg(bundles, "objectAtIndex:", (long)i);
+        if (!bid) continue;
 
-        char buf[256] = {0};
-        CFStringGetCString(bid, buf, sizeof(buf), kCFStringEncodingUTF8);
-        if (strlen(buf) == 0) continue;
+        const char *bidStr = msg_cstr(bid, "UTF8String");
+        if (!bidStr || strlen(bidStr) == 0) continue;
 
         char appName[64] = {0};
-        resolve_bundle_to_name(buf, appName, sizeof(appName));
+        resolve_bundle_to_name(bidStr, appName, sizeof(appName));
         if (strlen(appName) == 0) {
-            printf("[ProcGuard] 跳过无法解析的: %s\n", buf);
+            printf("[ProcGuard] 跳过无法解析: %s\n", bidStr);
             continue;
         }
 
         size_t len = strlen(appName) + 16;
-        g_match_names[g_match_count] = malloc(len);
+        g_match_names[g_match_count] = (char *)malloc(len);
         snprintf(g_match_names[g_match_count], len, "/%s.app/", appName);
-        printf("[ProcGuard] %s → %s\n", buf, appName);
+        printf("[ProcGuard] %s → %s\n", bidStr, appName);
         g_match_count++;
     }
 
-    CFRelease(bundles);
     printf("[ProcGuard] 已加载 %d 个监控目标\n", g_match_count);
-}
-
-static void clear_preferences(void) {
-    for (int i = 0; i < g_match_count; i++) free(g_match_names[i]);
-    g_match_count = 0;
-    memset(g_monitors, 0, sizeof(g_monitors));
-}
-
-static void prefs_changed(CFNotificationCenterRef center, void *observer,
-                          CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    pthread_mutex_lock(&g_lock);
-    clear_preferences();
-    pthread_mutex_unlock(&g_lock);
-    load_preferences();
-    printf("[ProcGuard] 偏好已热更新\n");
 }
 
 /* ==================== %ctor / %dtor ==================== */
@@ -235,18 +239,12 @@ static void prefs_changed(CFNotificationCenterRef center, void *observer,
         (void **)&orig_RBSSetForegroundProcessPID
     );
     printf("[ProcGuard] Hook _RBSSetForegroundProcessPID 成功\n");
-
-    CFNotificationCenterAddObserver(
-        CFNotificationCenterGetDarwinNotifyCenter(),
-        NULL, prefs_changed, DARWIN_NOTIFY_NAME,
-        NULL, CFNotificationSuspensionBehaviorDeliverImmediately
-    );
-    printf("[ProcGuard] Darwin 通知监听已注册\n");
 }
 
 %dtor {
     pthread_mutex_lock(&g_lock);
-    clear_preferences();
+    for (int i = 0; i < g_match_count; i++) free(g_match_names[i]);
+    g_match_count = 0;
     pthread_mutex_unlock(&g_lock);
     pthread_mutex_destroy(&g_lock);
     printf("[ProcGuard] 已卸载\n");
