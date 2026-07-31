@@ -1,12 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <substrate.h>
-#import <UIKit/UIKit.h>
 #import <signal.h>
 #import <time.h>
 #import <os/lock.h>
 #import <libproc.h>
-
-static NSString *const AlipayBundleID = @"com.alipay.iphoneclient";
 
 #define SCAN_INTERVAL_SEC  2
 #define FLOOD_INTERVAL     3
@@ -36,7 +33,7 @@ static void FloodCheck(void) {
     killCnt++;
     if (killCnt >= FLOOD_MAX_COUNT) {
         blockUntil = now + BLOCK_DURATION;
-        NSLog(@"[SB] 限流触发，封锁%ds", BLOCK_DURATION);
+        NSLog(@"[RBD] 限流触发，封锁%ds", BLOCK_DURATION);
     }
     os_unfair_lock_unlock(&floodLock);
 }
@@ -62,7 +59,7 @@ static void ScanAndKillAlipay(void) {
             @autoreleasepool {
                 kill(pids[i], SIGKILL);
                 FloodCheck();
-                NSLog(@"[SB] kill 支付宝 PID:%d", pids[i]);
+                NSLog(@"[RBD] kill 支付宝 PID:%d", pids[i]);
             }
             break;
         }
@@ -70,20 +67,8 @@ static void ScanAndKillAlipay(void) {
     free(pids);
 }
 
-%hook UIApplication
-- (BOOL)openURL:(NSURL *)url options:(NSDictionary *)options completionHandler:(void (^)(BOOL))completion {
-    NSString *scheme = url.scheme.lowercaseString;
-    if ([scheme hasPrefix:@"alipay"] || [scheme hasPrefix:@"tbopen"]) {
-        NSLog(@"[SB] 拦截URL唤起支付宝 %@", url);
-        if (completion) completion(NO);
-        return NO;
-    }
-    return %orig;
-}
-%end
-
 %ctor {
-    dispatch_queue_t q = dispatch_queue_create("com.sb.alipayscan", DISPATCH_QUEUE_SERIAL);
+    dispatch_queue_t q = dispatch_queue_create("com.rbd.alipayscan", DISPATCH_QUEUE_SERIAL);
     scanTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
     dispatch_source_set_timer(scanTimer, dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC),
         SCAN_INTERVAL_SEC * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
@@ -91,7 +76,7 @@ static void ScanAndKillAlipay(void) {
         ScanAndKillAlipay();
     });
     dispatch_resume(scanTimer);
-    NSLog(@"[BlockAlipaySB] 定时扫描已启动 (%ds)", SCAN_INTERVAL_SEC);
+    NSLog(@"[BlockAlipayRBD] runningboardd 扫描已启动 (%ds)", SCAN_INTERVAL_SEC);
 }
 
 %dtor {
