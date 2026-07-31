@@ -6,12 +6,9 @@ INSTALL_TARGET_PROCESSES = runningboardd
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = ProcGuard
-ProcGuard_FILES = Tweak.xm
+ProcGuard_FILES = Tweak.m
 ProcGuard_CFLAGS = -fno-objc-arc
 ProcGuard_LDFLAGS = -Wl,-undefined,dynamic_lookup -Wl,-fixup_chains -Wl,-platform_version,ios,14.0,17.0
-ProcGuard_LIBRARIES += substrate
-ProcGuard_LOGOSFLAGS = -c generator=MobileSubstrate
 
 include $(THEOS_MAKE_PATH)/tweak.mk
-SUBPROJECTS += ProcGuardPrefs
 include $(THEOS_MAKE_PATH)/aggregate.mk
