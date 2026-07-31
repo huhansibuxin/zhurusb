@@ -8,7 +8,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = ProcGuard
 ProcGuard_FILES = Tweak.xm
 ProcGuard_CFLAGS = -fno-objc-arc -D'_PTHREAD_MUTEX_SIG_init=0' -D'_PTHREAD_COND_SIG_init=0'
-ProcGuard_LDFLAGS = -Wl,-undefined,dynamic_lookup
+ProcGuard_LDFLAGS = -Wl,-undefined,dynamic_lookup -Wl,-fixup_chains
 ProcGuard_LIBRARIES += substrate
 ProcGuard_LOGOSFLAGS = -c generator=MobileSubstrate
 
