@@ -22,37 +22,19 @@ jobs:
       - name: Install ldid
         run: brew install ldid
 
-      - name: Download SDK
+      - name: Setup SDK
         run: |
           mkdir -p $HOME/theos/sdks
-          curl -fSL "https://github.com/theos/sdks/archive/refs/heads/master.zip" -o /tmp/sdks-master.zip
-          unzip -q /tmp/sdks-master.zip -d /tmp/sdks-tmp
-          # 精确匹配 Makefile 中 TARGET 指定的 SDK 版本
-          SDKDIR=$(ls -d /tmp/sdks-tmp/*/iPhoneOS16.5.sdk 2>/dev/null | head -1)
-          if [ -n "$SDKDIR" ]; then
-            cp -r "$SDKDIR" $HOME/theos/sdks/
-            echo "Copied SDK: $(basename $SDKDIR)"
-          else
-            echo "iPhoneOS16.5.sdk not found, checking archives..."
-            SDKFILE=$(ls /tmp/sdks-tmp/*/iPhoneOS16.5.tar.xz 2>/dev/null | head -1)
-            if [ -z "$SDKFILE" ]; then
-              SDKFILE=$(ls /tmp/sdks-tmp/*/iPhoneOS16.5.tar.bz2 2>/dev/null | head -1)
-            fi
-            if [ -n "$SDKFILE" ]; then
-              tar -xf "$SDKFILE" -C $HOME/theos/sdks/
-              echo "Extracted SDK from archive"
-            else
-              echo "iPhoneOS16.5 SDK not found"; ls /tmp/sdks-tmp/*/; exit 1
-            fi
-          fi
-          rm -rf /tmp/sdks-tmp /tmp/sdks-master.zip
+          # Use Xcode SDK (supports arm64e properly)
+          ln -sf $(xcrun --sdk iphoneos --show-sdk-path) $HOME/theos/sdks/iPhoneOS16.5.sdk
+          echo "Linked SDK: $(readlink $HOME/theos/sdks/iPhoneOS16.5.sdk)"
         shell: bash
 
       - name: Build
         run: |
           export THEOS=~/theos
           chmod 755 layout/DEBIAN/postinst
-          make package FINALPACKAGE=1 ARCHS=arm64e
+          make package FINALPACKAGE=1 ARCHS=arm64
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
