@@ -47,8 +47,7 @@ jobs:
             -install_name /var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib \
             Tweak.m
           ldid -S /tmp/ProcGuard.dylib
-          echo "=== Raw clang dylib LC ==="
-          jtool2 -l /tmp/ProcGuard.dylib | grep -E 'LC_DYLD'
+          file /tmp/ProcGuard.dylib
           # Replace in deb
           DEB=$(ls packages/*.deb)
           mkdir -p /tmp/deb
