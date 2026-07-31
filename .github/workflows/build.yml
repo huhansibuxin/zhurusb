@@ -72,6 +72,12 @@ jobs:
           otool -l /tmp/test_minimal.dylib | grep -iE 'CHAINED|mod_init|init_off|BUILD_VERSION' || true
           cp /tmp/test_minimal.dylib packages/
 
+      - name: Upload test minimal dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-minimal-dylib
+          path: packages/test_minimal.dylib
+
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
