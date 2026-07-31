@@ -1,5 +1,5 @@
 ARCHS = arm64
-TARGET = iphone:clang:16.5:16.0
+TARGET = iphone:clang:16.5:14.0
 THEOS_PACKAGE_SCHEME = rootless
 INSTALL_TARGET_PROCESSES = runningboardd
 
