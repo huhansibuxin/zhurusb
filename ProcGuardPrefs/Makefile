@@ -9,5 +9,6 @@ ProcGuardPrefs_INSTALL_PATH = /Library/PreferenceBundles
 ProcGuardPrefs_CFLAGS = -fobjc-arc
 ProcGuardPrefs_FRAMEWORKS = UIKit
 ProcGuardPrefs_PRIVATE_FRAMEWORKS = Preferences
+ProcGuardPrefs_LDFLAGS = -Wl,-undefined,dynamic_lookup
 
 include $(THEOS_MAKE_PATH)/bundle.mk
