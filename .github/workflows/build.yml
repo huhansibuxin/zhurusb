@@ -36,21 +36,47 @@ jobs:
           chmod 755 layout/DEBIAN/postinst
           make package FINALPACKAGE=1 ARCHS="arm64 arm64e"
 
-      - name: Verify dylib
+      - name: Debug find .o files
+        run: find .theos -name '*.o' | head -20
+
+      - name: Re-link dylib with raw clang (proper chained fixups + init)
         run: |
           set -e
-          mkdir -p /tmp/deb
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          # Find ProcGuard .o files split by arch
+          OBJS_ARM64=$(find .theos -path '*/arm64*/ProcGuard*.o' -o -path '*/arm64*/Tweak*.o' | tr '\n' ' ')
+          OBJS_ARM64E=$(find .theos -path '*/arm64e*/ProcGuard*.o' -o -path '*/arm64e*/Tweak*.o' | tr '\n' ' ')
+          # If empty, fallback: all .o files without arm64e in path
+          if [ -z "$OBJS_ARM64" ]; then
+            OBJS_ARM64=$(find .theos -name 'ProcGuard*.o' -not -path '*arm64e*' | tr '\n' ' ')
+            OBJS_ARM64E=$(find .theos -name 'ProcGuard*.o' -path '*arm64e*' | tr '\n' ' ')
+          fi
+          if [ -z "$OBJS_ARM64" ]; then
+            OBJS_ARM64=$(find .theos -name '*.o' -not -path '*arm64e*' -not -path '*ProcGuardPrefs*' | tr '\n' ' ')
+            OBJS_ARM64E=$(find .theos -name '*.o' -path '*arm64e*' -not -path '*ProcGuardPrefs*' | tr '\n' ' ')
+          fi
+          echo "arm64  objs: $OBJS_ARM64"
+          echo "arm64e objs: $OBJS_ARM64E"
+          LDFLAGS="-isysroot $SDK -miphoneos-version-min=14.0 -dynamiclib -Wl,-fixup_chains -install_name /var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib"
+          clang -arch arm64  $LDFLAGS $OBJS_ARM64  -o /tmp/arm64.dylib  -framework Foundation -framework CoreFoundation -lobjc -lc++
+          clang -arch arm64e $LDFLAGS $OBJS_ARM64E -o /tmp/arm64e.dylib -framework Foundation -framework CoreFoundation -lobjc -lc++
+          lipo -create /tmp/arm64.dylib /tmp/arm64e.dylib -output /tmp/ProcGuard.dylib
+          ldid -S /tmp/ProcGuard.dylib
+          echo "=== file ==="
+          file /tmp/ProcGuard.dylib
+          echo "=== init ==="
+          otool -l /tmp/ProcGuard.dylib | grep -i 'mod_init\|init_off' || true
+          echo "=== symbols ==="
+          nm /tmp/ProcGuard.dylib | grep ' T ' | head -10
+          echo "=== Replace in deb ==="
           DEB=$(ls packages/*.deb)
-          dpkg-deb -x $DEB /tmp/deb
-          DYLIB=/tmp/deb/var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib
-          echo "=== Size ==="
-          ls -la $DYLIB
-          echo "=== File ==="
-          file $DYLIB
-          echo "=== Load commands ==="
-          otool -l $DYLIB | grep -E 'LC_DYLD_CHAINED|LC_DYLD_INFO|_RBSSet|substrate' || true
-          echo "=== Symbols ==="
-          nm $DYLIB | grep ' T ' | head -5
+          mkdir -p /tmp/deb2
+          dpkg-deb -x $DEB /tmp/deb2
+          dpkg-deb -e $DEB /tmp/deb2/DEBIAN
+          cp /tmp/ProcGuard.dylib /tmp/deb2/var/jb/Library/MobileSubstrate/DynamicLibraries/ProcGuard.dylib
+          dpkg-deb -b /tmp/deb2 $DEB
+          echo "=== final deb size ==="
+          ls -la $DEB
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
