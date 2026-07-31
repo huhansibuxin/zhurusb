@@ -1,4 +1,9 @@
-#include <substrate.h>
+/* 手动声明 substrate API，避免 #include <substrate.h> 触发 CydiaSubstrate→MachO 模块链编译失败 */
+extern "C" {
+void  MSHookFunction(void *symbol, void *hook, void **old);
+void *MSFindSymbol(void *image, const char *name);
+}
+
 #include <sys/types.h>
 #include <time.h>
 #include <pthread.h>
