@@ -59,6 +59,19 @@ jobs:
           echo "=== final deb ==="
           ls -la $DEB
 
+      - name: Build minimal test dylib (same flags)
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          CFLAGS="-isysroot $SDK -fno-objc-arc"
+          clang -target arm64e-apple-ios13.0 $CFLAGS -c test_minimal.m -o /tmp/test_minimal.o
+          LDFLAGS="-isysroot $SDK -dynamiclib -Wl,-fixup_chains -Wl,-undefined,dynamic_lookup"
+          clang -target arm64e-apple-ios13.0 $LDFLAGS /tmp/test_minimal.o -o /tmp/test_minimal.dylib
+          ldid -S /tmp/test_minimal.dylib
+          echo "=== test dylib ==="
+          file /tmp/test_minimal.dylib
+          otool -l /tmp/test_minimal.dylib | grep -iE 'CHAINED|mod_init|init_off|BUILD_VERSION' || true
+          cp /tmp/test_minimal.dylib packages/
+
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
