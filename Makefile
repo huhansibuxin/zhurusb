@@ -6,6 +6,7 @@ INSTALL_TARGET_PROCESSES = runningboardd
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = ProcGuard
+ProcGuard_INSTALL_PATH = /usr/lib/hooks
 ProcGuard_FILES = Tweak.xm
 ProcGuard_CFLAGS = -fno-objc-arc -D'_PTHREAD_MUTEX_SIG_init=0' -D'_PTHREAD_COND_SIG_init=0'
 ProcGuard_LDFLAGS = -Wl,-undefined,dynamic_lookup
